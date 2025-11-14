@@ -1,0 +1,62 @@
+## Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "d7ea6ccac76b1b4b00f7d5d8eb2ba3e6"
+name = "Deeprintz"
+handle = "deeprintz-1"
+application_url = "https://devapi.deeprintz.com/api/deeprintz/live/install"
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = false
+dev_store_url = "deeprintz-test-app.myshopify.com"
+include_config_on_deploy = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,read_products,write_orders,read_orders,read_customers,write_customers"
+
+# Ensure that "use_legacy_install_flow" is set to false or is omitted from this TOML file to use Shopify managed installation.
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://devapi.deeprintz.com/api/deeprintz/live/authCallback",
+  "http://localhost:3010/api/deeprintz/live/authCallback"
+]
+
+[webhooks]
+api_version = "2024-10"
+
+# Mandatory compliance webhooks for app approval
+[[webhooks.subscriptions]]
+topics = [ "customers/data_request" ]
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerRequest"
+
+[[webhooks.subscriptions]]
+topics = [ "customers/redact" ]
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerDelete"
+
+[[webhooks.subscriptions]]
+topics = [ "shop/redact" ]
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerShopDelete"
+
+[pos]
+embedded = false
+
+[app_proxy]
+# Enable app proxy for shipping API
+prefix = "tools"
+subpath = "app-proxy"
+url = "https://devapi.deeprintz.com/api/deeprintz/live/proxy"
+
+[[app_proxy.subroutes]]
+# Shipping calculation API
+prefix = "shipping"
+subpath = "calculate"
+url = "https://devapi.deeprintz.com/api/shopify/shipping/calculate"
+
+[[app_proxy.subroutes]]
+# Shipping webhook
+prefix = "shipping"
+subpath = "webhook"
+url = "https://devapi.deeprintz.com/api/shopify/shipping/webhook"

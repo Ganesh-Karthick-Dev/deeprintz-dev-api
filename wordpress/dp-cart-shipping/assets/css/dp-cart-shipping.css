@@ -1,0 +1,20 @@
+.woocommerce-shipping-totals, .cart_totals .shipping, .woocommerce-checkout-review-order-table .shipping { display:none !important; }
+#dp-cart-ship input#dp-cart-pincode { outline:none; }
+#dp-shipping-row .amount { font-weight:700; }
+.dp-ship-note { color:#666; font-size:12px; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

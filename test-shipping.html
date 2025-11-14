@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WooCommerce Shipping Integration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            border: 1px solid #ddd;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background: #0073aa;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #005a87;
+        }
+        .shipping-results {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .shipping-option {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 4px;
+            background: white;
+        }
+        .shipping-option.recommended {
+            border-color: #0073aa;
+            background: #f0f8ff;
+        }
+        .courier-name {
+            font-weight: bold;
+            color: #0073aa;
+        }
+        .shipping-cost {
+            float: right;
+            font-weight: bold;
+            color: #28a745;
+        }
+        .delivery-time {
+            color: #666;
+            font-size: 14px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚚 WooCommerce Shipping Integration Test</h1>
+    
+    <div class="test-section">
+        <h2>📋 Test Configuration</h2>
+        <div class="form-group">
+            <label for="userId">Vendor User ID:</label>
+            <input type="number" id="userId" value="1039" placeholder="Enter vendor user ID">
+        </div>
+        <div class="form-group">
+            <label for="storeId">Store ID:</label>
+            <input type="number" id="storeId" value="1" placeholder="Enter store ID">
+        </div>
+        <div class="form-group">
+            <label for="apiBaseUrl">API Base URL:</label>
+            <input type="text" id="apiBaseUrl" value="/api/deeprintz/live/woocommerce" placeholder="Enter API base URL">
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>📍 Shipping Calculation Test</h2>
+        <div class="form-group">
+            <label for="postcode">Pincode:</label>
+            <input type="text" id="postcode" value="642126" placeholder="Enter pincode (e.g., 642126)" maxlength="6">
+        </div>
+        <div class="form-group">
+            <label for="weight">Weight (grams):</label>
+            <input type="number" id="weight" value="500" placeholder="Enter weight in grams">
+        </div>
+        <div class="form-group">
+            <label for="orderAmount">Order Amount (₹):</label>
+            <input type="number" id="orderAmount" value="550" placeholder="Enter order amount">
+        </div>
+        <div class="form-group">
+            <label for="paymentMode">Payment Mode:</label>
+            <select id="paymentMode">
+                <option value="prepaid">Prepaid</option>
+                <option value="cod">Cash on Delivery (COD)</option>
+            </select>
+        </div>
+        <button onclick="testShippingCalculation()">🚚 Calculate Shipping</button>
+        
+        <div id="status" class="status info" style="display: none;"></div>
+        
+        <div id="shippingResults" class="shipping-results" style="display: none;">
+            <h3>📦 Available Shipping Options</h3>
+            <div id="shippingOptionsList"></div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔧 Integration Status</h2>
+        <div id="integrationStatus">
+            <p>Click "Test Integration" to check if the shipping integration is working properly.</p>
+        </div>
+        <button onclick="testIntegration()">🔧 Test Integration</button>
+    </div>
+
+    <div class="test-section">
+        <h2>📊 API Endpoints Test</h2>
+        <button onclick="testAPIEndpoints()">🌐 Test API Endpoints</button>
+        <div id="apiResults"></div>
+    </div>
+
+    <script>
+        // Configuration
+        let config = {
+            userId: 1039,
+            storeId: 1,
+            apiBaseUrl: '/api/deeprintz/live/woocommerce'
+        };
+
+        // Update config from form inputs
+        function updateConfig() {
+            config.userId = parseInt(document.getElementById('userId').value) || 1039;
+            config.storeId = parseInt(document.getElementById('storeId').value) || 1;
+            config.apiBaseUrl = document.getElementById('apiBaseUrl').value || '/api/woocommerce';
+        }
+
+        // Show status message
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            statusDiv.style.display = 'block';
+        }
+
+        // Test shipping calculation
+        async function testShippingCalculation() {
+            updateConfig();
+            
+            const postcode = document.getElementById('postcode').value.trim();
+            const weight = parseInt(document.getElementById('weight').value) || 500;
+            const orderAmount = parseFloat(document.getElementById('orderAmount').value) || 0;
+            const paymentMode = document.getElementById('paymentMode').value;
+
+            if (!postcode || postcode.length < 6) {
+                showStatus('Please enter a valid 6-digit pincode', 'error');
+                return;
+            }
+
+            showStatus('🚚 Calculating shipping charges...', 'info');
+
+            try {
+                const response = await fetch(`${config.apiBaseUrl}/shipping/calculate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId: config.userId,
+                        postCode: postcode,
+                        weight: weight,
+                        orderAmount: orderAmount,
+                        paymentMode: paymentMode,
+                        items: []
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus(`✅ Shipping calculated successfully! Found ${result.data.shipping_options.length} options.`, 'success');
+                    displayShippingResults(result.data);
+                } else {
+                    showStatus(`❌ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Shipping calculation error:', error);
+                showStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Display shipping results
+        function displayShippingResults(shippingData) {
+            const resultsDiv = document.getElementById('shippingResults');
+            const optionsList = document.getElementById('shippingOptionsList');
+            
+            let optionsHTML = '';
+            
+            shippingData.shipping_options.forEach((option, index) => {
+                const isRecommended = index === 0 ? 'recommended' : '';
+                const recommendedText = index === 0 ? ' (Recommended)' : '';
+                
+                optionsHTML += `
+                    <div class="shipping-option ${isRecommended}">
+                        <div class="courier-name">${option.courier_name}${recommendedText}</div>
+                        <div class="shipping-cost">₹${option.total_cost}</div>
+                        <div class="delivery-time">${option.delivery_time}</div>
+                        <div style="margin-top: 10px;">
+                            <strong>Breakdown:</strong><br>
+                            Shipping Cost: ₹${option.shipping_cost}<br>
+                            ${option.cod_charge > 0 ? `COD Charge: ₹${option.cod_charge}<br>` : ''}
+                            Total: ₹${option.total_cost}
+                        </div>
+                    </div>
+                `;
+            });
+
+            optionsList.innerHTML = optionsHTML;
+            resultsDiv.style.display = 'block';
+        }
+
+        // Test integration
+        async function testIntegration() {
+            updateConfig();
+            showStatus('🔧 Testing integration...', 'info');
+
+            try {
+                // Test API connection
+                const response = await fetch(`${config.apiBaseUrl}/shipping/status?userId=${config.userId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('✅ Integration test successful!', 'success');
+                    document.getElementById('integrationStatus').innerHTML = `
+                        <h3>✅ Integration Status: Working</h3>
+                        <p><strong>Store:</strong> ${result.data.store_url || 'N/A'}</p>
+                        <p><strong>Shipping Methods:</strong> ${result.data.shipping_methods_count || 0}</p>
+                        <p><strong>Webhooks:</strong> ${result.data.webhooks_count || 0}</p>
+                        <p><strong>Last Updated:</strong> ${result.data.last_updated || 'N/A'}</p>
+                    `;
+                } else {
+                    showStatus(`❌ Integration test failed: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Integration test error: ${error.message}`, 'error');
+            }
+        }
+
+        // Test API endpoints
+        async function testAPIEndpoints() {
+            updateConfig();
+            const resultsDiv = document.getElementById('apiResults');
+            resultsDiv.innerHTML = '<h3>🌐 Testing API Endpoints...</h3>';
+
+            const endpoints = [
+                { name: 'Shipping Calculate', url: `${config.apiBaseUrl}/shipping/calculate`, method: 'POST' },
+                { name: 'Shipping Status', url: `${config.apiBaseUrl}/shipping/status?userId=${config.userId}`, method: 'GET' },
+                { name: 'Shipping Zones', url: `${config.apiBaseUrl}/shipping/zones?userId=${config.userId}`, method: 'GET' },
+                { name: 'Webhooks List', url: `${config.apiBaseUrl}/webhooks/list?userId=${config.userId}`, method: 'GET' }
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(endpoint.url, {
+                        method: endpoint.method,
+                        headers: endpoint.method === 'POST' ? { 'Content-Type': 'application/json' } : {},
+                        body: endpoint.method === 'POST' ? JSON.stringify({ userId: config.userId, postCode: '642126', weight: 500 }) : undefined
+                    });
+
+                    const status = response.status;
+                    const statusText = response.statusText;
+                    
+                    resultsDiv.innerHTML += `
+                        <div class="shipping-option">
+                            <strong>${endpoint.name}:</strong> ${endpoint.url}<br>
+                            <span style="color: ${status >= 200 && status < 300 ? 'green' : 'red'}">
+                                Status: ${status} ${statusText}
+                            </span>
+                        </div>
+                    `;
+                } catch (error) {
+                    resultsDiv.innerHTML += `
+                        <div class="shipping-option">
+                            <strong>${endpoint.name}:</strong> ${endpoint.url}<br>
+                            <span style="color: red;">Error: ${error.message}</span>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Shipping Integration Test Page Loaded');
+            
+            // Auto-calculate shipping when pincode changes
+            document.getElementById('postcode').addEventListener('input', function() {
+                const postcode = this.value.trim();
+                if (postcode.length === 6) {
+                    // Auto-trigger calculation after 1 second
+                    setTimeout(() => {
+                        if (this.value.trim().length === 6) {
+                            testShippingCalculation();
+                        }
+                    }, 1000);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

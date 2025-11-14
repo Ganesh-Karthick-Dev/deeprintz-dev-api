@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WooCommerce Shipping Integration Test</title>
+    <link rel="stylesheet" href="public/woocommerce-shipping-styles.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: #6c757d;
+            font-size: 1.1rem;
+        }
+        .test-section {
+            margin-bottom: 40px;
+            padding: 20px;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .test-section h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+        .api-test {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .btn {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: #005a87;
+            transform: translateY(-2px);
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .result.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-online {
+            background: #28a745;
+        }
+        .status-offline {
+            background: #dc3545;
+        }
+        .status-unknown {
+            background: #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚚 WooCommerce Shipping Integration Test</h1>
+            <p>Test the WooCommerce shipping integration API endpoints and functionality</p>
+        </div>
+
+        <!-- Connection Test -->
+        <div class="test-section">
+            <h3>🔍 Test WooCommerce Connection</h3>
+            <div class="api-test">
+                <div class="form-group">
+                    <label for="test-user-id">User ID:</label>
+                    <input type="text" id="test-user-id" value="test_user" placeholder="Enter user ID">
+                </div>
+                <button class="btn" onclick="testConnection()">Test Connection</button>
+                <div id="connection-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Shipping Calculation Test -->
+        <div class="test-section">
+            <h3>📦 Test Shipping Calculation</h3>
+            <div class="api-test">
+                <div class="form-group">
+                    <label for="calc-user-id">User ID:</label>
+                    <input type="text" id="calc-user-id" value="test_user" placeholder="Enter user ID">
+                </div>
+                <div class="form-group">
+                    <label for="calc-postcode">Postcode:</label>
+                    <input type="text" id="calc-postcode" value="110001" placeholder="Enter postcode">
+                </div>
+                <div class="form-group">
+                    <label for="calc-weight">Weight (grams):</label>
+                    <input type="number" id="calc-weight" value="500" placeholder="Enter weight in grams">
+                </div>
+                <div class="form-group">
+                    <label for="calc-amount">Order Amount:</label>
+                    <input type="number" id="calc-amount" value="1000" placeholder="Enter order amount">
+                </div>
+                <div class="form-group">
+                    <label for="calc-payment-mode">Payment Mode:</label>
+                    <select id="calc-payment-mode">
+                        <option value="prepaid">Prepaid</option>
+                        <option value="cod">Cash on Delivery</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="calculateShipping()">Calculate Shipping</button>
+                <div id="shipping-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Webhook Setup Test -->
+        <div class="test-section">
+            <h3>🔗 Test Webhook Setup</h3>
+            <div class="api-test">
+                <div class="form-group">
+                    <label for="webhook-user-id">User ID:</label>
+                    <input type="text" id="webhook-user-id" value="test_user" placeholder="Enter user ID">
+                </div>
+                <button class="btn" onclick="setupWebhooks()">Setup Webhooks</button>
+                <button class="btn btn-secondary" onclick="listWebhooks()">List Webhooks</button>
+                <div id="webhook-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Shipping Zones Test -->
+        <div class="test-section">
+            <h3>🌍 Test Shipping Zones</h3>
+            <div class="api-test">
+                <div class="form-group">
+                    <label for="zones-user-id">User ID:</label>
+                    <input type="text" id="zones-user-id" value="test_user" placeholder="Enter user ID">
+                </div>
+                <button class="btn" onclick="getShippingZones()">Get Shipping Zones</button>
+                <div id="zones-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Order Shipping Update Test -->
+        <div class="test-section">
+            <h3>🔄 Test Order Shipping Update</h3>
+            <div class="api-test">
+                <div class="form-group">
+                    <label for="update-user-id">User ID:</label>
+                    <input type="text" id="update-user-id" value="test_user" placeholder="Enter user ID">
+                </div>
+                <div class="form-group">
+                    <label for="update-order-id">Order ID:</label>
+                    <input type="text" id="update-order-id" value="123" placeholder="Enter order ID">
+                </div>
+                <div class="form-group">
+                    <label for="update-shipping-rate">Shipping Rate (JSON):</label>
+                    <textarea id="update-shipping-rate" rows="4" placeholder='{"courier_id": "delhivery", "total_cost": 150}'>{"courier_id": "delhivery", "total_cost": 150, "courier_name": "Delhivery", "delivery_time": "2-3 days"}</textarea>
+                </div>
+                <button class="btn" onclick="updateOrderShipping()">Update Order Shipping</button>
+                <div id="update-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Status Dashboard -->
+        <div class="test-section">
+            <h3>📊 Integration Status</h3>
+            <div class="api-test">
+                <div id="status-dashboard">
+                    <p><span class="status-indicator status-unknown"></span>Connection: <span id="connection-status">Unknown</span></p>
+                    <p><span class="status-indicator status-unknown"></span>Shipping API: <span id="shipping-status">Unknown</span></p>
+                    <p><span class="status-indicator status-unknown"></span>Webhooks: <span id="webhook-status">Unknown</span></p>
+                </div>
+                <button class="btn btn-secondary" onclick="checkAllStatus()">Check All Status</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:6996';
+
+        // Test WooCommerce connection
+        async function testConnection() {
+            const userId = document.getElementById('test-user-id').value;
+            const resultDiv = document.getElementById('connection-result');
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Testing connection...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/test-connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userId })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('connection', 'online');
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('connection', 'offline');
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+                updateStatus('connection', 'offline');
+            }
+        }
+
+        // Calculate shipping rates
+        async function calculateShipping() {
+            const userId = document.getElementById('calc-user-id').value;
+            const postCode = document.getElementById('calc-postcode').value;
+            const weight = document.getElementById('calc-weight').value;
+            const orderAmount = document.getElementById('calc-amount').value;
+            const paymentMode = document.getElementById('calc-payment-mode').value;
+            const resultDiv = document.getElementById('shipping-result');
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Calculating shipping...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/shipping/calculate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        postCode,
+                        weight: parseInt(weight),
+                        orderAmount: parseFloat(orderAmount),
+                        paymentMode,
+                        items: []
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('shipping', 'online');
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('shipping', 'offline');
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+                updateStatus('shipping', 'offline');
+            }
+        }
+
+        // Setup webhooks
+        async function setupWebhooks() {
+            const userId = document.getElementById('webhook-user-id').value;
+            const resultDiv = document.getElementById('webhook-result');
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Setting up webhooks...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/webhooks/setup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ userId })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('webhook', 'online');
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                    updateStatus('webhook', 'offline');
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+                updateStatus('webhook', 'offline');
+            }
+        }
+
+        // List webhooks
+        async function listWebhooks() {
+            const userId = document.getElementById('webhook-user-id').value;
+            const resultDiv = document.getElementById('webhook-result');
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Fetching webhooks...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/webhooks/list?userId=${userId}`);
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Get shipping zones
+        async function getShippingZones() {
+            const userId = document.getElementById('zones-user-id').value;
+            const resultDiv = document.getElementById('zones-result');
+            
+            try {
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Fetching shipping zones...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/shipping/zones?userId=${userId}`);
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Update order shipping
+        async function updateOrderShipping() {
+            const userId = document.getElementById('update-user-id').value;
+            const orderId = document.getElementById('update-order-id').value;
+            const shippingRateText = document.getElementById('update-shipping-rate').value;
+            const resultDiv = document.getElementById('update-result');
+            
+            try {
+                const shippingRate = JSON.parse(shippingRateText);
+                
+                resultDiv.style.display = 'block';
+                resultDiv.className = 'result info';
+                resultDiv.textContent = 'Updating order shipping...';
+                
+                const response = await fetch(`${API_BASE_URL}/api/woocommerce/shipping/update-order`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        orderId,
+                        shippingRate
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = JSON.stringify(result, null, 2);
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Update status indicators
+        function updateStatus(type, status) {
+            const statusElement = document.getElementById(`${type}-status`);
+            const indicator = statusElement.previousElementSibling;
+            
+            statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+            indicator.className = `status-indicator status-${status}`;
+        }
+
+        // Check all status
+        async function checkAllStatus() {
+            await testConnection();
+            await calculateShipping();
+            await setupWebhooks();
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 WooCommerce Shipping Integration Test Page Loaded');
+            console.log('📡 API Base URL:', API_BASE_URL);
+            
+            // Auto-check connection status
+            setTimeout(() => {
+                checkAllStatus();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

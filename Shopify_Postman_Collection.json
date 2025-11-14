@@ -1,0 +1,793 @@
+{
+  "info": {
+    "name": "Shopify Integration - Complete Test Collection",
+    "description": "Complete Postman collection for testing Shopify integration including OAuth, products, orders, shipping, and webhooks",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "shopify-integration"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{shopify_access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://devapi.deeprintz.com",
+      "type": "string"
+    },
+    {
+      "key": "shop_domain",
+      "value": "your-shop.myshopify.com",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "123",
+      "type": "string"
+    },
+    {
+      "key": "shopify_access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. AUTHENTICATION & SETUP",
+      "item": [
+        {
+          "name": "Install Shopify App (OAuth)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/install?shop={{shop_domain}}&userid={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "install"],
+              "query": [
+                {
+                  "key": "shop",
+                  "value": "{{shop_domain}}"
+                },
+                {
+                  "key": "userid",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Initiates Shopify OAuth installation flow. This will redirect to Shopify for permission approval."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Store Connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/testConnection",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "testConnection"]
+            },
+            "description": "Tests if the Shopify store connection is active and working."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Connection Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getConnectionStatus?userId={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getConnectionStatus"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Retrieves the current connection status for a user's Shopify store."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Store Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getStoreStats?userId={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getStoreStats"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Retrieves detailed statistics about the connected Shopify store."
+          },
+          "response": []
+        },
+        {
+          "name": "Disconnect Store",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"shopDomain\": \"{{shop_domain}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/disconnect",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "disconnect"]
+            },
+            "description": "Disconnects the Shopify store from the application."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. PRODUCT MANAGEMENT",
+      "item": [
+        {
+          "name": "Get Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getProducts?userId={{user_id}}&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getProducts"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Retrieves products from the connected Shopify store."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Product (Simple)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/createProduct",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "createProduct"]
+            },
+            "description": "Creates a new product in Shopify from the local database. Requires a valid local product ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Product (With Variants)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"2\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/createProduct",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "createProduct"]
+            },
+            "description": "Creates a product with size variants in Shopify."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"{{product_id}}\",\n    \"productData\": {\n        \"title\": \"Updated Product Title\",\n        \"description\": \"Updated description\",\n        \"status\": \"ACTIVE\"\n    }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/updateProduct",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "updateProduct"]
+            },
+            "description": "Updates an existing product in Shopify."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"{{product_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/deleteProduct",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "deleteProduct"]
+            },
+            "description": "Deletes a product from Shopify."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Create Products",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"products\": [\n        {\n            \"title\": \"Bulk Product 1\",\n            \"description\": \"Description for bulk product 1\",\n            \"productType\": \"Print-on-Demand\",\n            \"vendor\": \"Deeprintz\",\n            \"status\": \"ACTIVE\",\n            \"variants\": [\n                {\n                    \"price\": \"29.99\",\n                    \"sku\": \"BULK-1\",\n                    \"inventoryQuantity\": 999999\n                }\n            ]\n        },\n        {\n            \"title\": \"Bulk Product 2\",\n            \"description\": \"Description for bulk product 2\",\n            \"productType\": \"Print-on-Demand\",\n            \"vendor\": \"Deeprintz\",\n            \"status\": \"ACTIVE\",\n            \"variants\": [\n                {\n                    \"price\": \"39.99\",\n                    \"sku\": \"BULK-2\",\n                    \"inventoryQuantity\": 999999\n                }\n            ]\n        }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/bulkCreateProducts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "bulkCreateProducts"]
+            },
+            "description": "Creates multiple products in Shopify in a single request."
+          },
+          "response": []
+        },
+        {
+          "name": "Resync Product Inventory",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"{{product_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/resyncProductInventory",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "resyncProductInventory"]
+            },
+            "description": "Resyncs inventory for a product at all target locations (Canada + India)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. ORDER MANAGEMENT",
+      "item": [
+        {
+          "name": "Get Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getOrders?userId={{user_id}}&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getOrders"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Retrieves orders from the connected Shopify store."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getOrderById/{{order_id}}?userId={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getOrderById", "{{order_id}}"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Retrieves a specific order by its ID."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. SHIPPING & CARRIER SERVICES",
+      "item": [
+        {
+          "name": "Calculate Shipping Rates",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"shopDomain\": \"{{shop_domain}}\",\n    \"postCode\": \"110001\",\n    \"weight\": \"0.5\",\n    \"orderAmount\": \"29.99\",\n    \"paymentMode\": \"prepaid\",\n    \"items\": [\n        {\n            \"name\": \"Test Product\",\n            \"quantity\": 1,\n            \"weight\": 0.5\n        }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/calculateShipping",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "calculateShipping"]
+            },
+            "description": "Calculates shipping rates for a given destination and order details."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Carrier Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/manualRegisterCarrierService",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "manualRegisterCarrierService"]
+            },
+            "description": "Manually registers the carrier service for shipping rate calculations."
+          },
+          "response": []
+        },
+        {
+          "name": "List Carrier Services",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/listCarrierServices?userId={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "listCarrierServices"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Lists all carrier services registered for the connected Shopify store."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. WEBHOOKS & AUTOMATION",
+      "item": [
+        {
+          "name": "Register Order Webhooks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/manualRegisterWebhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "manualRegisterWebhooks"]
+            },
+            "description": "Manually registers order webhooks for the connected Shopify store."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Order Create Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Shopify-Topic",
+                "value": "orders/create"
+              },
+              {
+                "key": "X-Shopify-Shop-Domain",
+                "value": "{{shop_domain}}"
+              },
+              {
+                "key": "X-Shopify-Hmac-Sha256",
+                "value": "test-hmac-signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"id\": 1234567890,\n    \"name\": \"#1001\",\n    \"email\": \"customer@example.com\",\n    \"created_at\": \"2024-01-15T10:30:00Z\",\n    \"updated_at\": \"2024-01-15T10:30:00Z\",\n    \"total_price\": \"29.99\",\n    \"subtotal_price\": \"29.99\",\n    \"total_tax\": \"0.00\",\n    \"currency\": \"INR\",\n    \"financial_status\": \"paid\",\n    \"fulfillment_status\": null,\n    \"customer\": {\n        \"id\": 123456789,\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"email\": \"customer@example.com\"\n    },\n    \"billing_address\": {\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"address1\": \"123 Test Street\",\n        \"city\": \"New Delhi\",\n        \"province\": \"Delhi\",\n        \"country\": \"India\",\n        \"zip\": \"110001\"\n    },\n    \"shipping_address\": {\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"address1\": \"123 Test Street\",\n        \"city\": \"New Delhi\",\n        \"province\": \"Delhi\",\n        \"country\": \"India\",\n        \"zip\": \"110001\"\n    },\n    \"line_items\": [\n        {\n            \"id\": 123456789,\n            \"product_id\": 987654321,\n            \"variant_id\": 111111111,\n            \"title\": \"Test Product\",\n            \"quantity\": 1,\n            \"price\": \"29.99\",\n            \"sku\": \"TEST-001\",\n            \"grams\": 500\n        }\n    ],\n    \"shipping_lines\": [\n        {\n            \"title\": \"Standard Shipping\",\n            \"price\": \"0.00\",\n            \"code\": \"Standard\"\n        }\n    ],\n    \"tax_lines\": [],\n    \"note\": \"Test order from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/handleOrderWebhook",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "handleOrderWebhook"]
+            },
+            "description": "Simulates an order creation webhook from Shopify. Note: HMAC validation will fail in test environment."
+          },
+          "response": []
+        },
+        {
+          "name": "Simulate Shipping Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Shopify-Topic",
+                "value": "orders/updated"
+              },
+              {
+                "key": "X-Shopify-Shop-Domain",
+                "value": "{{shop_domain}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"rate\": {\n        \"origin\": {\n            \"country\": \"IN\",\n            \"postal_code\": \"110001\",\n            \"province\": \"DL\",\n            \"city\": \"New Delhi\",\n            \"name\": null,\n            \"address1\": \"Test Address\",\n            \"address2\": null,\n            \"address3\": null,\n            \"phone\": null,\n            \"fax\": null,\n            \"email\": null,\n            \"address_type\": null,\n            \"company_name\": null\n        },\n        \"destination\": {\n            \"country\": \"IN\",\n            \"postal_code\": \"400001\",\n            \"province\": \"MH\",\n            \"city\": \"Mumbai\",\n            \"name\": \"John Doe\",\n            \"address1\": \"123 Test Street\",\n            \"address2\": null,\n            \"address3\": null,\n            \"phone\": \"9876543210\",\n            \"fax\": null,\n            \"email\": \"customer@example.com\",\n            \"address_type\": null,\n            \"company_name\": null\n        },\n        \"items\": [\n            {\n                \"name\": \"Test Product\",\n                \"sku\": \"TEST-001\",\n                \"quantity\": 1,\n                \"grams\": 500,\n                \"price\": 2999,\n                \"vendor\": \"Deeprintz\",\n                \"requires_shipping\": true,\n                \"taxable\": true,\n                \"fulfillment_service\": \"manual\"\n            }\n        ],\n        \"currency\": \"INR\",\n        \"locale\": \"en\"\n    }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/handleShippingWebhook",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "handleShippingWebhook"]
+            },
+            "description": "Simulates a shipping rate calculation webhook from Shopify checkout."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. DIRECT SHOPIFY API CALLS (REST)",
+      "item": [
+        {
+          "name": "Get Shop Info (Direct API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Shopify-Access-Token",
+                "value": "{{shopify_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "https://{{shop_domain}}/admin/api/2024-10/shop.json",
+              "host": ["{{shop_domain}}"],
+              "path": ["admin", "api", "2024-10", "shop.json"]
+            },
+            "description": "Direct Shopify API call to get shop information. Requires valid access token."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Products (Direct API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Shopify-Access-Token",
+                "value": "{{shopify_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "https://{{shop_domain}}/admin/api/2024-10/products.json?limit=5",
+              "host": ["{{shop_domain}}"],
+              "path": ["admin", "api", "2024-10", "products.json"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Direct Shopify API call to get products. Requires valid access token."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Orders (Direct API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Shopify-Access-Token",
+                "value": "{{shopify_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "https://{{shop_domain}}/admin/api/2024-10/orders.json?limit=5",
+              "host": ["{{shop_domain}}"],
+              "path": ["admin", "api", "2024-10", "orders.json"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Direct Shopify API call to get orders. Requires valid access token."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Locations (Direct API)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Shopify-Access-Token",
+                "value": "{{shopify_access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "https://{{shop_domain}}/admin/api/2024-10/locations.json",
+              "host": ["{{shop_domain}}"],
+              "path": ["admin", "api", "2024-10", "locations.json"]
+            },
+            "description": "Direct Shopify API call to get store locations. Requires valid access token."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. ERROR TESTING & EDGE CASES",
+      "item": [
+        {
+          "name": "Test with Invalid User ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/getProducts?userId=999999",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "getProducts"],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "999999"
+                }
+              ]
+            },
+            "description": "Tests error handling when using an invalid/non-existent user ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Test with Invalid Product ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"productId\": \"999999\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/createProduct",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "createProduct"]
+            },
+            "description": "Tests error handling when trying to create a product with invalid product ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Shipping with Invalid Pincode",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"shopDomain\": \"{{shop_domain}}\",\n    \"postCode\": \"999999\",\n    \"weight\": \"0.5\",\n    \"orderAmount\": \"29.99\",\n    \"paymentMode\": \"prepaid\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/calculateShipping",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "calculateShipping"]
+            },
+            "description": "Tests shipping calculation with an invalid pincode to check error handling."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Bulk Create with Empty Array",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"userId\": \"{{user_id}}\",\n    \"products\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/deeprintz/dev/shopify/bulkCreateProducts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "deeprintz", "dev", "shopify", "bulkCreateProducts"]
+            },
+            "description": "Tests bulk create operation with an empty products array."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set timestamp for all requests",
+          "pm.globals.set(\"timestamp\", new Date().toISOString());",
+          "",
+          "// Set request ID for tracking",
+          "pm.globals.set(\"request_id\", pm.info.requestId);"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Common test cases for all requests",
+          "pm.test(\"Status code is not 5xx\", function () {",
+          "    pm.expect(pm.response.code).to.not.be.oneOf([500, 501, 502, 503, 504, 505]);",
+          "});",
+          "",
+          "pm.test(\"Response time is less than 30000ms\", function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(30000);",
+          "});",
+          "",
+          "pm.test(\"Response has proper JSON structure\", function () {",
+          "    var jsonData = pm.response.json();",
+          "    if (jsonData) {",
+          "        pm.expect(jsonData).to.be.an('object');",
+          "        if (jsonData.success !== undefined) {",
+          "            pm.expect(jsonData.success).to.be.a('boolean');",
+          "        }",
+          "    }",
+          "});",
+          "",
+          "// Store product_id from create product response",
+          "if (pm.info.requestName.includes('Create Product') && pm.response.code === 200) {",
+          "    var jsonData = pm.response.json();",
+          "    if (jsonData && jsonData.data && jsonData.data.product && jsonData.data.product.id) {",
+          "        pm.collectionVariables.set(\"product_id\", jsonData.data.product.id);",
+          "    }",
+          "}",
+          "",
+          "// Store order_id from webhook simulation",
+          "if (pm.info.requestName.includes('Order Create Webhook') && pm.response.code === 200) {",
+          "    var jsonData = pm.response.json();",
+          "    if (jsonData && jsonData.id) {",
+          "        pm.collectionVariables.set(\"order_id\", jsonData.id);",
+          "    }",
+          "}"
+        ]
+      }
+    }
+  ]
+}
+
