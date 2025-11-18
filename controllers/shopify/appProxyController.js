@@ -131,7 +131,24 @@ class AppProxyController {
   // Get user ID from shop domain
   async getUserIdFromShop(shop) {
     try {
-      // Query your database to find user ID by shop domain
+      // Normalize shop domain (remove .myshopify.com if present, add it if missing)
+      let normalizedShop = shop;
+      if (!normalizedShop.includes('.')) {
+        normalizedShop = `${normalizedShop}.myshopify.com`;
+      }
+      
+      // Query shopify_stores table to find vendor_id by shop_domain
+      const shopifyStore = await global.dbConnection('shopify_stores')
+        .where('shop_domain', normalizedShop)
+        .orWhere('shop_domain', shop)
+        .first();
+
+      if (shopifyStore && shopifyStore.vendor_id) {
+        console.log('✅ Found vendor_id from shopify_stores:', shopifyStore.vendor_id);
+        return shopifyStore.vendor_id;
+      }
+
+      // Fallback: Try app_users table (for WooCommerce stores)
       const user = await global.dbConnection('app_users')
         .where('store_url', 'like', `%${shop}%`)
         .orWhere('store_url', 'like', `%${shop.replace('.myshopify.com', '')}%`)
@@ -140,6 +157,8 @@ class AppProxyController {
       return user ? user.userid : null;
     } catch (error) {
       console.error('❌ Error getting user ID from shop:', error);
+      console.error('❌ Error details:', error.message);
+      console.error('❌ Shop domain:', shop);
       return null;
     }
   }

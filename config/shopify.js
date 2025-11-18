@@ -30,6 +30,9 @@ const SHOPIFY_CONFIG = {
     'write_inventory',
     // Location scopes
     'read_locations',
+    // Shipping scopes (required for CarrierService registration)
+    'read_shipping',
+    'write_shipping',
     // Publication scopes (required for publishing products to Online Store)
     'read_publications',
     'write_publications'
@@ -50,6 +53,21 @@ const SHOPIFY_CONFIG = {
   
   get SUCCESS_REDIRECT_URL() {
     return `${this.BASE_URL}/shopify/success`;
+  },
+  
+  // CarrierService URL (for shipping rates)
+  get CARRIER_SERVICE_URL() {
+    return `${this.API_BASE}/shopify/carrier/rates`;
+  },
+  
+  // Webhook URLs
+  get WEBHOOK_URL_ORDERS() {
+    return `${this.API_BASE}/shopify/webhooks/orders`;
+  },
+  
+  // Helper method to get webhook URL with userId query parameter (legacy format)
+  getWebhookUrlWithUserId(userId) {
+    return `${this.API_BASE}/shopify/orders/webhook?userId=${userId}`;
   }
 };
 

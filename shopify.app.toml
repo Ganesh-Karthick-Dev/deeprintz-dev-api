@@ -14,7 +14,8 @@ include_config_on_deploy = true
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 # Required scopes matching Shopify app configuration
-scopes = "read_customers,read_fulfillments,write_fulfillments,write_inventory,read_inventory,read_locations,read_orders,write_orders,read_product_listings,write_product_listings,read_products,write_products,read_publications,write_publications"
+# Note: read_shipping and write_shipping are required for CarrierService registration
+scopes = "read_customers,read_fulfillments,write_fulfillments,write_inventory,read_inventory,read_locations,read_orders,write_orders,read_product_listings,write_product_listings,read_products,write_products,read_publications,write_publications,read_shipping,write_shipping"
 
 # Ensure that "use_legacy_install_flow" is set to false or is omitted from this TOML file to use Shopify managed installation.
 use_legacy_install_flow = false
@@ -40,6 +41,11 @@ uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerDelete"
 [[webhooks.subscriptions]]
 topics = [ "shop/redact" ]
 uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerShopDelete"
+
+# Order management webhooks
+[[webhooks.subscriptions]]
+topics = [ "orders/create", "orders/updated", "orders/fulfilled", "orders/partially_fulfilled" ]
+uri = "https://df5b0a4dbe35.ngrok-free.app/api/deeprintz/live/shopify/webhooks/orders"
 
 [pos]
 embedded = false

@@ -108,7 +108,7 @@ class ModernShopifyController {
     }
   }
 
-  // Handle Shopify order webhooks (orders/create, orders/updated)
+  // Handle Shopify order webhooks (orders/create, orders/updated, orders/fulfilled, orders/partially_fulfilled)
   async handleOrderWebhook(req, res) {
     try {
       console.log('📥 Shopify order webhook received');
@@ -124,6 +124,8 @@ class ModernShopifyController {
           name: req.body?.name,
           order_number: req.body?.order_number,
           created_at: req.body?.created_at,
+          fulfillment_status: req.body?.fulfillment_status,
+          financial_status: req.body?.financial_status,
           line_items_count: Array.isArray(req.body?.line_items) ? req.body.line_items.length : 0
         };
         console.log('🧾 Payload summary:', bodySummary);
@@ -216,7 +218,8 @@ class ModernShopifyController {
             shopifyOrderProductPrice: item.price,
             shopifyOrderProductQuantity: item.quantity,
             shopifyOrderProductTotal: (Number(item.price) || 0) * (Number(item.quantity) || 1),
-            shopifyVariants
+            shopifyVariants,
+            fulfillment_status: item.fulfillment_status
           };
         }));
       }
@@ -229,7 +232,7 @@ class ModernShopifyController {
         vendor_id: vendorId,
         woo_order_id: orderPayload.id || 0,
         order_number: orderPayload.name || orderPayload.order_number || `S_${Date.now()}`,
-        status: orderPayload.financial_status || orderPayload.fulfillment_status || 'pending',
+        status: orderPayload.fulfillment_status || orderPayload.financial_status || 'pending',
         date_created: this.parseDateOrNow(orderPayload.created_at),
         date_modified: this.parseDateOrNow(orderPayload.updated_at),
         total: orderPayload.total_price || 0,
@@ -262,6 +265,7 @@ class ModernShopifyController {
         shipping_lines: JSON.stringify(orderPayload.shipping_lines || []),
         tax_lines: JSON.stringify(orderPayload.tax_lines || []),
         refunds: JSON.stringify(orderPayload.refunds || []),
+        fulfillments: JSON.stringify(orderPayload.fulfillments || []),
         meta_data: JSON.stringify(orderPayload)
       };
 
@@ -326,6 +330,22 @@ class ModernShopifyController {
         }
       }
 
+      // Handle automatic fulfillment for paid orders that are not yet fulfilled
+      if (topic === 'orders/create' || topic === 'orders/updated') {
+        if (orderPayload.financial_status === 'paid' &&
+            (!orderPayload.fulfillment_status || orderPayload.fulfillment_status === 'unfulfilled')) {
+          console.log('💰 Order is paid and unfulfilled, attempting automatic fulfillment...');
+
+          try {
+            await this.createOrderFulfillment(shopDomain, orderPayload.id, processedItems);
+            console.log('✅ Automatic fulfillment created for order:', orderPayload.name);
+          } catch (fulfillmentError) {
+            console.error('❌ Failed to create automatic fulfillment:', fulfillmentError.message);
+            // Don't fail the webhook processing if fulfillment fails
+          }
+        }
+      }
+
       console.log('✅ Shopify order processed and stored', { topic, vendor_id: vendorId, order_id: storedOrderId });
       return;
     } catch (error) {
@@ -336,6 +356,128 @@ class ModernShopifyController {
         }
       } catch (_) {}
       return;
+    }
+  }
+
+  // Create order fulfillment using Shopify GraphQL API
+  async createOrderFulfillment(shopDomain, orderId, lineItems) {
+    try {
+      console.log('📦 Creating fulfillment for order:', orderId);
+
+      const shopResult = await this.getShopConnectionByDomain(shopDomain);
+      if (!shopResult.success) {
+        throw new Error(`Shop connection not found: ${shopResult.error}`);
+      }
+
+      const { shop } = shopResult;
+      const client = this.shopifyService.createGraphQLClient(shop.shop_domain, shop.access_token);
+
+      // Get unfulfilled line items
+      const unfulfilledLineItems = lineItems.filter(item =>
+        !item.fulfillment_status || item.fulfillment_status === 'unfulfilled'
+      );
+
+      if (unfulfilledLineItems.length === 0) {
+        console.log('ℹ️ No unfulfilled line items found for order:', orderId);
+        return { success: true, message: 'No unfulfilled items' };
+      }
+
+      console.log('📋 Creating fulfillment for', unfulfilledLineItems.length, 'line items');
+
+      // Prepare fulfillment input for GraphQL mutation
+      const fulfillmentInput = {
+        orderId: `gid://shopify/Order/${orderId}`,
+        lineItems: unfulfilledLineItems.map(item => ({
+          id: `gid://shopify/LineItem/${item.shopifyOrderProductId}`,
+          quantity: item.shopifyOrderProductQuantity
+        })),
+        notifyCustomer: false, // Don't notify customer yet (can be configured)
+        trackingInfo: null // No tracking info for now (can be added later)
+      };
+
+      // GraphQL mutation to create fulfillment
+      const createFulfillmentMutation = `
+        mutation fulfillmentCreate($input: FulfillmentCreateInput!) {
+          fulfillmentCreate(input: $input) {
+            fulfillment {
+              id
+              status
+              createdAt
+              updatedAt
+              lineItems {
+                edges {
+                  node {
+                    id
+                    quantity
+                    lineItem {
+                      id
+                      name
+                      sku
+                    }
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+      console.log('🚀 Executing fulfillment creation mutation...');
+      const response = await client.request(createFulfillmentMutation, {
+        variables: { input: fulfillmentInput }
+      });
+
+      if (response.data?.fulfillmentCreate?.userErrors?.length > 0) {
+        const errors = response.data.fulfillmentCreate.userErrors;
+        const errorMessages = errors.map(e => `${e.field}: ${e.message}`).join(', ');
+        throw new Error(`Fulfillment creation failed: ${errorMessages}`);
+      }
+
+      const fulfillment = response.data?.fulfillmentCreate?.fulfillment;
+      if (!fulfillment) {
+        throw new Error('No fulfillment returned from Shopify');
+      }
+
+      console.log('✅ Fulfillment created successfully:', {
+        id: fulfillment.id,
+        status: fulfillment.status,
+        lineItemsCount: fulfillment.lineItems?.edges?.length || 0
+      });
+
+      return {
+        success: true,
+        fulfillmentId: fulfillment.id,
+        status: fulfillment.status,
+        lineItemsFulfilled: fulfillment.lineItems?.edges?.length || 0
+      };
+
+    } catch (error) {
+      console.error('❌ Error creating order fulfillment:', error.message);
+      console.error('❌ Error details:', error);
+      throw error;
+    }
+  }
+
+  // Get shop connection by domain (helper method)
+  async getShopConnectionByDomain(shopDomain) {
+    try {
+      const shop = await global.dbConnection('shopify_stores')
+        .where('shop_domain', shopDomain)
+        .where('status', 'connected')
+        .first();
+
+      if (!shop) {
+        return { success: false, error: 'Shop not found or not connected' };
+      }
+
+      return { success: true, shop };
+    } catch (error) {
+      console.error('❌ Error getting shop connection by domain:', error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -851,7 +993,7 @@ class ModernShopifyController {
   // Get products from Shopify using GraphQL
   async getProducts(req, res) {
     try {
-      console.log('📦 Modern Shopify products request:', req.query);
+      // console.log('📦 Modern Shopify products request:', req.query);
 
       const { userId, limit = 10, cursor = null } = req.query;
 
@@ -910,7 +1052,7 @@ class ModernShopifyController {
   // Create product in Shopify using GraphQL (compatible with pushProductsToWooCommerce data structure)
   async createProduct(req, res) {
     try {
-      console.log('➕ Modern Shopify create product request:', req.body);
+      // console.log('➕ Modern Shopify create product request:', req.body);
 
       const { userId, productId } = req.body;
 
@@ -937,7 +1079,7 @@ class ModernShopifyController {
       const shopifyService = require('../../service/shopify-old/index');
       const product = await shopifyService.getShopifyProductById(productId);
 
-      console.log("🔍 Product data from database:", JSON.stringify(product, null, 2));
+      // console.log("🔍 Product data from database:", JSON.stringify(product, null, 2));
 
       if (!product) {
         return res.status(404).json({
@@ -945,7 +1087,7 @@ class ModernShopifyController {
           message: 'Product not found'
         });
       }
-      console.log("product.productdescproduct.productdesc", product.productdesc);
+      // console.log("product.productdescproduct.productdesc", product.productdesc);
       // Check if product has variants (sizes)
       const hasVariants = product.variants && product.variants.length > 0;
 
@@ -993,7 +1135,7 @@ class ModernShopifyController {
 
       // Handle variants (sizes) similar to WooCommerce
       if (hasVariants) {
-        console.log("🔍 Processing variants:", JSON.stringify(product.variants, null, 2));
+        // console.log("🔍 Processing variants:", JSON.stringify(product.variants, null, 2));
 
         // Group variants by size (similar to EditProductModal logic)
         // This ensures we create one Shopify variant per size, summing quantities for all colors
@@ -1045,7 +1187,7 @@ class ModernShopifyController {
           const sku = `DP-${product.deeprintzProductId}-${sizeGroup.sizesku || size}-${Date.now()}`;
           const quantity = sizeGroup.totalQuantity;
 
-          console.log(`📦 Creating variant for size ${size}: Price: ${price} - SKU: ${sku} - Total Quantity: ${quantity} (from ${sizeGroup.variants.length} color variants)`);
+          // console.log(`📦 Creating variant for size ${size}: Price: ${price} - SKU: ${sku} - Total Quantity: ${quantity} (from ${sizeGroup.variants.length} color variants)`);
 
           return {
             price: price.toString(),
@@ -1062,7 +1204,7 @@ class ModernShopifyController {
           ? Math.max(0, parseInt(product.variants[0].quantity) || 0)
           : 0;
 
-        console.log(`📦 Creating simple product - INR Price: ${price} - SKU: ${sku} - Quantity: ${quantity}`);
+        // console.log(`📦 Creating simple product - INR Price: ${price} - SKU: ${sku} - Quantity: ${quantity}`);
 
         shopifyProductData.variants = [{
           price: price.toString(),
@@ -1071,7 +1213,7 @@ class ModernShopifyController {
         }];
       }
 
-      console.log("Shopify product data:", JSON.stringify(shopifyProductData, null, 2));
+      // console.log("Shopify product data:", JSON.stringify(shopifyProductData, null, 2));
 
       // Create product using modern GraphQL service
       const createResult = await this.shopifyService.createProduct(
@@ -1116,14 +1258,35 @@ class ModernShopifyController {
           // 1. Register CarrierService (REQUIRED for Shopify to show shipping options)
           // This tells Shopify to call our API for shipping rates
           try {
-            await this.registerCarrierService(shop.shop_domain, shop.access_token);
-            console.log('✅ CarrierService registered successfully');
+            const carrierResult = await this.registerCarrierService(shop.shop_domain, shop.access_token);
+            if (carrierResult.success) {
+              console.log('✅ CarrierService registered successfully');
+            } else {
+              console.log('ℹ️ CarrierService registration result:', carrierResult.message || 'Service already exists');
+            }
           } catch (carrierError) {
-            // If carrier service already exists, that's okay
-            if (carrierError.response?.status === 422 || carrierError.message?.includes('already exists')) {
+            // Check if error message indicates service already exists/configured
+            const errorMessage = carrierError.message || '';
+            if (errorMessage.includes('already exists') || 
+                errorMessage.includes('already configured') ||
+                errorMessage.includes('is already configured')) {
+              console.log('ℹ️ CarrierService already registered/configured, continuing...');
+            } else if (carrierError.response?.status === 422 || errorMessage.includes('already exists')) {
               console.log('ℹ️ CarrierService already registered, continuing...');
+            } else if (carrierError.response?.status === 403) {
+              console.error('❌ 403 Forbidden - Missing shipping scopes!');
+              console.error('❌ CRITICAL: The access token stored in database does NOT have shipping scopes!');
+              console.error('❌ Even though scopes are in Partner Dashboard, the OLD token is being used.');
+              console.error('❌ ACTION REQUIRED:');
+              console.error('   1. Go to your app and DISCONNECT the Shopify store');
+              console.error('   2. RECONNECT it (this triggers OAuth with new scopes)');
+              console.error('   3. The new access token (with shipping scopes) will be saved');
+              console.error('   4. Then push a product again - CarrierService will register successfully');
+              console.error('❌ Simply re-authenticating in Partner Dashboard is NOT enough - you must disconnect/reconnect in your app!');
+              // Continue anyway - user needs to fix scopes manually
             } else {
               console.error('⚠️ Failed to register CarrierService:', carrierError.message);
+              console.error('⚠️ Error details:', JSON.stringify(carrierError.response?.data || {}, null, 2));
               // Continue anyway - might already be registered
             }
           }
@@ -1138,8 +1301,8 @@ class ModernShopifyController {
           await this.storeShippingConfiguration(userId, shop.shop_domain, {
             configured_at: new Date().toISOString(),
             method: 'carrier_service',
-            carrier_service_url: `https://devapi.deeprintz.com/api/deeprintz/live/shopify/carrier/rates`,
-            script_url: `https://devapi.deeprintz.com/tools/app-proxy/shipping/script?userId=${userId}&shop=${shop.shop_domain}`
+            carrier_service_url: SHOPIFY_CONFIG.CARRIER_SERVICE_URL,
+            script_url: `${SHOPIFY_CONFIG.BASE_URL}/tools/app-proxy/shipping/script?userId=${userId}&shop=${shop.shop_domain}`
           });
 
           console.log('✅ Automatic shipping setup completed for Shopify vendor:', userId);
@@ -2028,10 +2191,12 @@ class ModernShopifyController {
     try {
       console.log('📱 Setting up shipping calculator script for vendor:', userId);
 
+      const SHOPIFY_CONFIG = require('../../config/shopify');
+
       // Create a custom script tag for the shipping calculator
       const scriptTag = {
         event: "onload",
-        src: `https://devapi.deeprintz.com/tools/app-proxy/shipping/script?userId=${userId}&shop=${shop.shop_domain}`,
+        src: `${SHOPIFY_CONFIG.BASE_URL}/tools/app-proxy/shipping/script?userId=${userId}&shop=${shop.shop_domain}`,
         display_scope: "online_store"
       };
 
@@ -2051,15 +2216,17 @@ class ModernShopifyController {
     try {
       console.log('🔗 Setting up shipping webhooks for vendor:', userId);
 
+      const SHOPIFY_CONFIG = require('../../config/shopify');
+
       const webhooks = [
         {
           topic: "orders/create",
-          address: `https://devapi.deeprintz.com/api/shopify/shipping/webhook?userId=${userId}`,
+          address: `${SHOPIFY_CONFIG.API_BASE}/shopify/shipping/webhook?userId=${userId}`,
           format: "json"
         },
         {
           topic: "orders/updated",
-          address: `https://devapi.deeprintz.com/api/shopify/shipping/webhook?userId=${userId}`,
+          address: `${SHOPIFY_CONFIG.API_BASE}/shopify/shipping/webhook?userId=${userId}`,
           format: "json"
         }
       ];
@@ -2132,46 +2299,285 @@ class ModernShopifyController {
     }
   }
 
-  // Register CarrierService for shipping rates
+  // Register CarrierService for shipping rates using GraphQL (recommended by Shopify)
   async registerCarrierService(shop, accessToken) {
     try {
       console.log('🚚 Registering CarrierService for shop:', shop);
       
-      const axios = require('axios');
+      const client = this.shopifyService.createGraphQLClient(shop, accessToken);
       
-      const carrierServiceData = {
-        carrier_service: {
-          name: "Deeprintz Live Shipping Rates",
-          callback_url: "https://devapi.deeprintz.com/api/deeprintz/live/shopify/carrier/rates",
-          service_discovery: true,
-          format: "json"
-        }
-      };
+      // Use dynamic callback URL from config (automatically uses ngrok in dev)
+      const callbackUrl = SHOPIFY_CONFIG.CARRIER_SERVICE_URL;
       
-      const response = await axios.post(
-        `https://${shop}/admin/api/2024-10/carrier_services.json`,
-        carrierServiceData,
-        {
-          headers: {
-            'X-Shopify-Access-Token': accessToken,
-            'Content-Type': 'application/json'
-          },
-          timeout: 10000
+      console.log('📡 CarrierService callback URL:', callbackUrl);
+      console.log('📡 Using base URL:', SHOPIFY_CONFIG.BASE_URL);
+      console.log('📡 Environment:', SHOPIFY_CONFIG.ENVIRONMENT);
+      
+      let carrierServiceName = "Deeprintz Live Shipping Rates"; // Use let so we can modify it if needed
+      
+      // First, try to query existing carrier services to check if ours already exists using GraphQL
+      let existingCarrierServiceId = null;
+      try {
+        // Use GraphQL query to list carrier services (latest stable API)
+        const listQuery = `
+          query carrierServices($first: Int!) {
+            carrierServices(first: $first) {
+              edges {
+                node {
+                  id
+                  name
+                  callbackUrl
+                  active
+                  supportsServiceDiscovery
+                }
+              }
+              pageInfo {
+                hasNextPage
+              }
+            }
+          }
+        `;
+        
+        const listResponse = await client.request(listQuery, { 
+          variables: { first: 50 } 
+        });
+        
+        if (listResponse.data?.carrierServices?.edges) {
+          const existing = listResponse.data.carrierServices.edges.find(
+            edge => edge.node.name === carrierServiceName || edge.node.name?.includes('Deeprintz Live Shipping Rates')
+          );
+          
+          if (existing) {
+            existingCarrierServiceId = existing.node.id;
+            console.log('ℹ️ Found existing CarrierService with ID:', existingCarrierServiceId);
+            console.log('ℹ️ Existing callback URL:', existing.node.callbackUrl || 'not set');
+            console.log('ℹ️ Required callback URL:', callbackUrl);
+            console.log('ℹ️ Active status:', existing.node.active);
+            console.log('ℹ️ Supports service discovery:', existing.node.supportsServiceDiscovery);
+            
+            // Check if callback URL matches - if not, we need to update or recreate
+            if (existing.node.callbackUrl && existing.node.callbackUrl !== callbackUrl) {
+              console.log('⚠️ WARNING: Existing CarrierService has different callback URL!');
+              console.log('⚠️ This will cause "Shipping not available" errors in checkout');
+              console.log('⚠️ Existing URL:', existing.node.callbackUrl);
+              console.log('⚠️ Required URL:', callbackUrl);
+            }
+          }
         }
-      );
+      } catch (queryError) {
+        console.log('ℹ️ Could not fetch existing carrier services via GraphQL, will try to create new one');
+        console.log('ℹ️ Query error:', queryError.message);
+        if (queryError.response?.errors) {
+          console.log('ℹ️ GraphQL errors:', JSON.stringify(queryError.response.errors, null, 2));
+        }
+        // Continue - we'll try to create, and if it already exists, Shopify will return an error we can handle
+      }
+      
+      // Define mutations outside if/else so they're accessible in both blocks
+      const updateMutation = `
+        mutation carrierServiceUpdate($input: DeliveryCarrierServiceUpdateInput!) {
+          carrierServiceUpdate(input: $input) {
+            carrierService {
+              id
+              name
+              callbackUrl
+              active
+              supportsServiceDiscovery
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      
+      const createMutation = `
+        mutation carrierServiceCreate($input: DeliveryCarrierServiceCreateInput!) {
+          carrierServiceCreate(input: $input) {
+            carrierService {
+              id
+              name
+              callbackUrl
+              active
+              supportsServiceDiscovery
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      
+      let response;
+      if (existingCarrierServiceId) {
+        // Try to update existing CarrierService using GraphQL mutation
+        console.log('🔄 Attempting to update existing CarrierService with new callback URL...');
+        
+        const updateInput = {
+          id: existingCarrierServiceId,
+          name: carrierServiceName,
+          callbackUrl: callbackUrl,
+          supportsServiceDiscovery: true,  // Required: Enables service discovery for dynamic shipping options
+          active: true
+        };
+        
+        try {
+          response = await client.request(updateMutation, { variables: { input: updateInput } });
+          
+          if (response.data?.carrierServiceUpdate?.userErrors?.length > 0) {
+            const errors = response.data.carrierServiceUpdate.userErrors;
+            const errorMessages = errors.map(e => e.message).join(', ');
+            
+            // If update fails because carrier not found or can't be updated, try to delete and recreate
+            if (errorMessages.includes('could not be found') || errorMessages.includes('not found')) {
+              console.log('ℹ️ Cannot update existing CarrierService (may be from different app instance)');
+              console.log('ℹ️ Attempting to delete and recreate...');
+              
+              // Try to delete using GraphQL mutation first (recommended by Shopify)
+              let deleted = false;
+              try {
+                const deleteMutation = `
+                  mutation carrierServiceDelete($id: ID!) {
+                    carrierServiceDelete(id: $id) {
+                      deletedCarrierServiceId
+                      userErrors {
+                        field
+                        message
+                      }
+                    }
+                  }
+                `;
+                
+                const deleteResponse = await client.request(deleteMutation, { 
+                  variables: { id: existingCarrierServiceId } 
+                });
+                
+                if (deleteResponse.data?.carrierServiceDelete?.userErrors?.length === 0) {
+                  console.log('✅ Deleted existing CarrierService using GraphQL mutation');
+                  deleted = true;
+                  existingCarrierServiceId = null; // Reset to trigger creation
+                } else {
+                  const deleteErrors = deleteResponse.data?.carrierServiceDelete?.userErrors || [];
+                  console.log('ℹ️ GraphQL delete returned errors:', JSON.stringify(deleteErrors));
+                }
+              } catch (graphqlDeleteError) {
+                console.log('ℹ️ GraphQL delete failed:', graphqlDeleteError.message);
+              }
+              
+              // If GraphQL delete failed, we'll create a new one with a different name
+              if (!deleted) {
+                console.log('ℹ️ GraphQL delete failed - cannot delete existing CarrierService');
+                console.log('⚠️ CRITICAL: Cannot delete existing CarrierService - it may have wrong callback URL!');
+                console.log('⚠️ The existing CarrierService may NOT work if it has wrong callback URL');
+                console.log('⚠️ SOLUTION OPTION 1 (Recommended): Manually update in Shopify Admin');
+                console.log('⚠️   1. Go to Shopify Admin → Settings → Shipping and delivery');
+                console.log('⚠️   2. Find "Deeprintz Live Shipping Rates" in shipping zones');
+                console.log('⚠️   3. Update the carrier service callback URL to:', callbackUrl);
+                console.log('⚠️ SOLUTION OPTION 2: Create new CarrierService with different name');
+                // Change name to create a new one (Shopify allows multiple with different names)
+                // Use a timestamp to make it unique
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                carrierServiceName = `Deeprintz Live Shipping Rates (${timestamp})`;
+                console.log('ℹ️ Will create new CarrierService with name:', carrierServiceName);
+                console.log('ℹ️ This new service will have the correct callback URL and will work');
+                existingCarrierServiceId = null; // Reset to trigger creation
+              }
+            } else {
+              throw new Error(`CarrierService update errors: ${JSON.stringify(errors)}`);
+            }
+          } else {
+            console.log('✅ CarrierService updated successfully');
+          }
+        } catch (updateError) {
+          console.log('ℹ️ Update failed, will try to create new one:', updateError.message);
+          existingCarrierServiceId = null; // Reset to trigger creation
+        }
+      }
+      
+      // Create new CarrierService if update failed or no existing service found
+      if (!existingCarrierServiceId) {
+        // Create new CarrierService using GraphQL mutation
+        console.log('➕ Creating new CarrierService...');
+        
+        const createInput = {
+          name: carrierServiceName,
+          callbackUrl: callbackUrl,
+          supportsServiceDiscovery: true,  // Required: Enables service discovery for dynamic shipping options
+          active: true
+        };
+        
+        response = await client.request(createMutation, { variables: { input: createInput } });
+        
+        if (response.data?.carrierServiceCreate?.userErrors?.length > 0) {
+          const errors = response.data.carrierServiceCreate.userErrors;
+          const errorMessages = errors.map(e => e.message).join(', ');
+          
+          // If service already exists or is already configured, that's okay - it means it's already registered
+          if (errorMessages.includes('already exists') || 
+              errorMessages.includes('duplicate') || 
+              errorMessages.includes('name has already been taken') ||
+              errorMessages.includes('already configured') ||
+              errorMessages.includes('is already configured')) {
+            console.log('ℹ️ CarrierService already exists/configured - this is okay, continuing...');
+            console.log('ℹ️ The CarrierService is registered and will work with the existing callback URL');
+            // Return success since the service already exists (callback URL might be different but that's okay)
+            return {
+              success: true,
+              carrierServiceId: 'existing',
+              callbackUrl: callbackUrl,
+              message: 'CarrierService already exists/configured'
+            };
+          } else {
+            throw new Error(`CarrierService creation errors: ${JSON.stringify(errors)}`);
+          }
+        } else {
+          console.log('✅ CarrierService created successfully');
+        }
+      }
 
-      if (response.data && response.data.carrier_service) {
-        console.log('✅ CarrierService registered:', response.data.carrier_service.id);
+      const carrierService = response.data?.carrierServiceUpdate?.carrierService || 
+                            response.data?.carrierServiceCreate?.carrierService;
+      
+      if (carrierService) {
+        console.log('✅ CarrierService registered/updated:', carrierService.id);
         return {
           success: true,
-          carrierServiceId: response.data.carrier_service.id
+          carrierServiceId: carrierService.id,
+          callbackUrl: callbackUrl
         };
       } else {
-        throw new Error('Invalid response from Shopify API');
+        throw new Error('Invalid response from Shopify GraphQL API');
       }
 
     } catch (error) {
-      console.error('❌ Error registering CarrierService:', error.response?.data || error.message);
+      console.error('❌ Error registering CarrierService:', error.message);
+      console.error('❌ Error details:', JSON.stringify(error, null, 2));
+      
+      // Check for GraphQL errors
+      if (error.response?.errors) {
+        console.error('❌ GraphQL errors:', JSON.stringify(error.response.errors, null, 2));
+      }
+      
+      // Check for specific error messages
+      if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+        console.error('❌ 403 Forbidden - Missing required scopes (read_shipping, write_shipping)');
+        console.error('❌ IMPORTANT: Even if scopes are added in Partner Dashboard, the access token must be refreshed!');
+        console.error('❌ SOLUTION:');
+        console.error('   1. Disconnect the Shopify store from your app');
+        console.error('   2. Re-connect it (this will trigger OAuth with new scopes)');
+        console.error('   3. The new access token will be saved to the database');
+        console.error('   4. Then push a product again to register CarrierService');
+        console.error('❌ Current access token does NOT have shipping scopes - it needs to be refreshed via re-authentication');
+      } else if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+        console.error('❌ 401 Unauthorized - Invalid access token or token expired');
+        console.error('❌ SOLUTION: Re-authenticate the Shopify store connection');
+      } else if (error.message?.includes('already exists') || error.message?.includes('422')) {
+        console.error('❌ CarrierService might already exist or invalid data');
+        console.error('ℹ️ This is usually okay - the CarrierService might already be registered');
+      }
+      
       throw error;
     }
   }
@@ -2242,7 +2648,7 @@ class ModernShopifyController {
     }
   }
 
-  // List CarrierServices for the connected shop
+  // List CarrierServices for the connected shop using GraphQL (latest stable API)
   async listCarrierServices(req, res) {
     try {
       const { userId } = req.query;
@@ -2257,15 +2663,76 @@ class ModernShopifyController {
       }
 
       const { shop } = shopResult;
-      const axios = require('axios');
-      const response = await axios.get(`https://${shop.shop_domain}/admin/api/2024-10/carrier_services.json`, {
-        headers: { 'X-Shopify-Access-Token': shop.access_token }
+      const client = this.shopifyService.createGraphQLClient(shop.shop_domain, shop.access_token);
+      
+      // Use GraphQL query to list carrier services
+      const listQuery = `
+        query carrierServices($first: Int!) {
+          carrierServices(first: $first) {
+            edges {
+              node {
+                id
+                name
+                callbackUrl
+                active
+                supportsServiceDiscovery
+                serviceDiscovery
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+      `;
+      
+      const response = await client.request(listQuery, { 
+        variables: { first: 50 } 
       });
 
-      return res.json({ success: true, data: response.data });
+      const carrierServices = response.data?.carrierServices?.edges || [];
+      const ourService = carrierServices.find(
+        edge => edge.node.name === 'Deeprintz Live Shipping Rates' || 
+                edge.node.name?.includes('Deeprintz Live Shipping Rates')
+      );
+
+      return res.json({ 
+        success: true, 
+        data: {
+          carrierServices: carrierServices.map(edge => edge.node),
+          pageInfo: response.data?.carrierServices?.pageInfo
+        },
+        ourService: ourService?.node || null,
+        instructions: ourService ? {
+          message: 'CarrierService is registered!',
+          callbackUrl: ourService.node.callbackUrl,
+          active: ourService.node.active,
+          supportsServiceDiscovery: ourService.node.supportsServiceDiscovery,
+          nextSteps: [
+            '1. Go to Settings → Shipping and delivery',
+            '2. Click on a shipping zone (e.g., "India")',
+            '3. Click "Add rate" or "Manage rates"',
+            '4. Select "Use carrier or app to calculate rates"',
+            '5. Choose "Deeprintz Live Shipping Rates" from the dropdown',
+            '6. Save the shipping zone'
+          ]
+        } : {
+          message: 'CarrierService not found. It needs to be registered first.',
+          action: 'Push a product to automatically register the CarrierService'
+        }
+      });
     } catch (error) {
-      console.error('❌ Error in listCarrierServices:', error.response?.data || error.message);
-      return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+      console.error('❌ Error in listCarrierServices:', error.message);
+      if (error.response?.errors) {
+        console.error('❌ GraphQL errors:', JSON.stringify(error.response.errors, null, 2));
+      }
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Internal server error', 
+        error: error.message,
+        graphqlErrors: error.response?.errors || null
+      });
     }
   }
 
@@ -2276,25 +2743,32 @@ class ModernShopifyController {
       
       const axios = require('axios');
       
+      // Use dynamic webhook URL from config (automatically uses ngrok in dev)
+      const webhookUrl = SHOPIFY_CONFIG.getWebhookUrlWithUserId(userId);
+      
+      console.log('📡 Webhook URL:', webhookUrl);
+      console.log('📡 Environment:', SHOPIFY_CONFIG.ENVIRONMENT);
+      console.log('📡 Base URL:', SHOPIFY_CONFIG.API_BASE);
+      
       const webhooksToRegister = [
         {
           webhook: {
             topic: "orders/create",
-            address: `https://devapi.deeprintz.com/api/deeprintz/live/shopify/orders/webhook?userId=${userId}`,
+            address: webhookUrl,
             format: "json"
           }
         },
         {
           webhook: {
             topic: "orders/updated",
-            address: `https://devapi.deeprintz.com/api/deeprintz/live/shopify/orders/webhook?userId=${userId}`,
+            address: webhookUrl,
             format: "json"
           }
         },
         {
           webhook: {
             topic: "orders/paid",
-            address: `https://devapi.deeprintz.com/api/deeprintz/live/shopify/orders/webhook?userId=${userId}`,
+            address: webhookUrl,
             format: "json"
           }
         }

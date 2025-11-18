@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ShopifyShippingController = require('../../controllers/shopify/shopifyShippingController');
-
-// Create controller instance
-const shippingController = new ShopifyShippingController();
+const shippingController = new ShopifyShippingController(); // Create instance
 
 // Apply rate limiting to all shipping routes
 const shippingRateLimit = ShopifyShippingController.createRateLimit();
@@ -644,11 +642,357 @@ router.get('/app-proxy/shipping/calculate-debug', async (req, res) => {
   }
 });
 
+// ============================================================================
+// SHOPIFY CARRIER SERVICE ROUTES (for native checkout integration)
+// MUST BE BEFORE AUTHENTICATION - Shopify calls this directly without auth
+// ============================================================================
+
+/**
+ * @route GET /api/shopify/carrier/rates/test
+ * @desc Test endpoint to verify CarrierService endpoint is accessible
+ * @access Public
+ */
+router.get('/carrier/rates/test', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'CarrierService endpoint is accessible',
+    timestamp: new Date().toISOString(),
+    shopDomain: req.headers['x-shopify-shop-domain'] || 'not provided',
+    callbackUrl: `${req.protocol}://${req.get('host')}${req.originalUrl.replace('/test', '')}`
+  });
+});
+
+/**
+ * @route POST /api/shopify/carrier/rates
+ * @desc CarrierService rates endpoint - Shopify calls this to get shipping rates
+ * @access Public (Shopify calls this directly - NO AUTHENTICATION REQUIRED)
+ * @body Shopify CarrierService request with rate object
+ * 
+ * Shopify sends:
+ * {
+ *   "rate": {
+ *     "destination": { "postal_code": "641012", ... },
+ *     "items": [{ "grams": 200, "price": 16150, ... }]
+ *   }
+ * }
+ * 
+ * We must return:
+ * {
+ *   "rates": [
+ *     {
+ *       "service_name": "Blue Dart Standard",
+ *       "service_code": "BLUEDART_STD",
+ *       "total_price": "5000",  // String in cents (₹50.00)
+ *       "currency": "INR",
+ *       "description": "Blue Dart - 3-5 days",
+ *       "min_delivery_date": "2024-01-15",
+ *       "max_delivery_date": "2024-01-17"
+ *     }
+ *   ]
+ * }
+ */
+router.post('/carrier/rates', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    console.log('='.repeat(80));
+    console.log('🚚 CarrierService rates request received at:', new Date().toISOString());
+    console.log('📡 Request headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+    console.log('📋 Request method:', req.method);
+    console.log('🔗 Request URL:', req.url);
+    
+    // Extract shop domain from headers (Shopify sends this)
+    const shopDomain = req.headers['x-shopify-shop-domain'] || 
+                       req.headers['x-shopify-shop'] || 
+                       req.headers['x-shopify-shop-domain']?.toLowerCase();
+    
+    console.log('🏪 Shop domain extracted:', shopDomain);
+    
+    if (!shopDomain) {
+      console.error('❌ No shop domain in request headers');
+      console.error('❌ Available headers:', Object.keys(req.headers));
+      return res.status(200).json({ rates: [] }); // Shopify expects 200 OK even on error
+    }
+    
+    // Normalize shop domain
+    const normalizedShopDomain = shopDomain.includes('.myshopify.com') 
+      ? shopDomain 
+      : `${shopDomain}.myshopify.com`;
+    
+    console.log('🏪 Normalized shop domain:', normalizedShopDomain);
+    
+    // Get userId from shop domain (optional - for logging/tracking)
+    let userId = null;
+    try {
+      const AppProxyController = require('../../controllers/shopify/appProxyController');
+      const appProxyController = new AppProxyController();
+      userId = await appProxyController.getUserIdFromShop(normalizedShopDomain);
+      console.log('✅ Found userId from shop domain:', userId);
+    } catch (userIdError) {
+      console.log('ℹ️ Could not get userId from shop domain (continuing anyway):', userIdError.message);
+      console.log('ℹ️ Error stack:', userIdError.stack);
+    }
+    
+    // Extract data from Shopify's CarrierService request
+    // Shopify sends: { rate: { destination: { postal_code: "..." }, items: [...], ... } }
+    const { rate } = req.body;
+    
+    console.log('📊 Rate object:', JSON.stringify(rate, null, 2));
+    
+    if (!rate) {
+      console.error('❌ No rate object in request body');
+      console.error('❌ Request body structure:', Object.keys(req.body || {}));
+      return res.status(200).json({ rates: [] }); // Shopify expects 200 OK
+    }
+    
+    const { destination, items, currency, origin } = rate;
+    
+    console.log('📍 Destination:', destination);
+    console.log('📦 Items:', items);
+    console.log('💰 Currency:', currency);
+    console.log('🏠 Origin:', origin);
+    
+    if (!destination) {
+      console.error('❌ No destination object in rate');
+      return res.status(200).json({ rates: [] });
+    }
+    
+    if (!destination.postal_code) {
+      console.error('❌ No destination postal_code in rate');
+      console.error('❌ Destination object:', destination);
+      return res.status(200).json({ rates: [] });
+    }
+    
+    const postalCode = destination.postal_code.toString().trim();
+    
+    if (!postalCode || postalCode.length < 5) {
+      console.error('❌ Invalid postal code:', postalCode);
+      return res.status(200).json({ rates: [] });
+    }
+    
+    console.log('📮 Postal code:', postalCode);
+    
+    // Calculate total weight and value from items
+    // Shopify sends: grams (e.g., 200g) and price in cents (e.g., 16150 = ₹161.50)
+    let totalWeightGrams = 0;
+    let totalValueCents = 0;
+    
+    if (items && items.length > 0) {
+      // First, try to get weights from Shopify payload
+      totalWeightGrams = items.reduce((sum, item) => sum + (item.grams || 0), 0);
+      totalValueCents = items.reduce((sum, item) => sum + (item.price || 0), 0);
+      
+      // If weight is 0, try to fetch from database
+      if (totalWeightGrams === 0) {
+        console.log('⚠️ Shopify payload has 0 weight, fetching from database...');
+        
+        try {
+          // Fetch weights from productvariants table
+          // Use product name to find the Deeprintz product
+          for (const item of items) {
+            console.log(`🔍 Looking up weight for: "${item.name}", SKU: ${item.sku}`);
+            
+            // Extract product name (remove size variant like "- Small")
+            const productName = item.name.split(' - ')[0].trim();
+            console.log(`   Product name extracted: "${productName}"`);
+            
+            // Find the Deeprintz product by name
+            const deeprintzProduct = await global.dbConnection('products')
+              .where('productname', 'like', `%${productName}%`)
+              .select('productid', 'productname')
+              .first();
+            
+            if (deeprintzProduct) {
+              console.log(`✅ Found Deeprintz product: ID ${deeprintzProduct.productid} - ${deeprintzProduct.productname}`);
+              
+              // Now get a variant for this product (any variant will have the weight)
+              const variant = await global.dbConnection('productvariants')
+                .where('productid', deeprintzProduct.productid)
+                .select('weight', 'unit')
+                .first();
+              
+              if (variant && variant.weight) {
+                let weightInGrams = parseFloat(variant.weight);
+                
+                // Convert to grams if needed
+                if (variant.unit === 'kg') {
+                  weightInGrams = weightInGrams * 1000;
+                } else if (variant.unit !== 'gms' && variant.unit !== 'grams') {
+                  // Assume grams
+                  console.log(`⚠️ Unknown unit "${variant.unit}", assuming grams`);
+                }
+                
+                totalWeightGrams += weightInGrams * (item.quantity || 1);
+                console.log(`✅ Found weight in DB: ${weightInGrams}g (unit: ${variant.unit})`);
+              } else {
+                console.log(`⚠️ No variant weight found for product ${deeprintzProduct.productid}`);
+              }
+            } else {
+              console.log(`⚠️ No product found matching name: "${productName}"`);
+            }
+          }
+        } catch (dbError) {
+          console.log('⚠️ Database lookup failed:', dbError.message);
+          console.log('   Stack:', dbError.stack);
+        }
+      }
+    } else {
+      // Default values if no items
+      totalWeightGrams = 250; // 250g default
+      totalValueCents = 0;
+    }
+    
+    // Final fallback: if still 0 after database lookup, use default
+    if (totalWeightGrams === 0) {
+      totalWeightGrams = 250; // 250g fallback for apparel
+      console.log('⚠️ No weight found anywhere, using fallback: 250g');
+    }
+    
+    // Convert for Nimbus Post API:
+    // - Weight: grams → kg (Nimbus Post expects kg)
+    // - Order amount: cents → rupees (Nimbus Post expects rupees)
+    const totalWeightKg = totalWeightGrams / 1000;
+    const totalValueRupees = totalValueCents / 100;
+    
+    console.log('📦 Calculated totals:', { 
+      postalCode, 
+      weightGrams: totalWeightGrams, 
+      weightKg: totalWeightKg,
+      valueCents: totalValueCents,
+      valueRupees: totalValueRupees,
+      userId, 
+      shopDomain 
+    });
+    
+    // Use the shipping controller which has NimbusPost + fallback logic
+    let shippingResult = null;
+
+    try {
+      console.log('🚚 Calculating shipping rates using controller...');
+
+      // Use the shipping controller which has NimbusPost + fallback logic
+      shippingResult = await shippingController.calculateNimbusPostShipping({
+        postCode: postalCode,
+        weight: totalWeightGrams, // Use grams as expected by controller
+        orderAmount: totalValueRupees,
+        paymentMode: 'prepaid', // Always prepaid for Shopify
+        items: []
+      });
+
+      console.log('📦 Shipping calculation result:', {
+        success: shippingResult.success,
+        source: shippingResult.data?.source,
+        optionsCount: shippingResult.data?.shipping_options?.length || 0
+      });
+
+    } catch (shippingError) {
+      console.error('❌ Shipping calculation failed:', shippingError.message);
+      shippingResult = { success: false, error: shippingError.message };
+    }
+
+    let shopifyRates = [];
+
+    if (shippingResult.success && shippingResult.data?.shipping_options?.length > 0) {
+      // Convert shipping options to Shopify CarrierService format
+      shopifyRates = shippingResult.data.shipping_options
+        .map(option => {
+          // Convert rupees to cents for Shopify
+          const totalPriceCents = Math.round(option.total_cost * 100);
+
+          // Calculate delivery dates
+          let minDays = 3;
+          let maxDays = 5;
+
+          // Try to extract days from delivery time
+          const deliveryTime = option.estimated_delivery || '3-5 days';
+          const daysMatch = deliveryTime.match(/(\d+)(?:\s*-\s*(\d+))?/);
+          if (daysMatch) {
+            minDays = parseInt(daysMatch[1]) || 3;
+            maxDays = daysMatch[2] ? parseInt(daysMatch[2]) : (minDays + 2);
+          }
+
+          const minDate = new Date();
+          minDate.setDate(minDate.getDate() + minDays);
+          const maxDate = new Date();
+          maxDate.setDate(maxDate.getDate() + maxDays);
+
+          return {
+            service_name: option.courier_name,
+            service_code: option.courier_id,
+            total_price: totalPriceCents.toString(),
+            currency: currency || 'INR',
+            description: `${option.courier_name} - ${deliveryTime}`,
+            min_delivery_date: minDate.toISOString().split('T')[0],
+            max_delivery_date: maxDate.toISOString().split('T')[0]
+          };
+        })
+        .filter(rate => rate !== null);
+    }
+
+    // If no rates from controller, provide fallback mock rates
+    if (shopifyRates.length === 0) {
+      console.log('⚠️ No shipping options available, providing mock rates for testing');
+
+      shopifyRates = [
+        {
+          service_name: 'Standard Delivery',
+          service_code: 'STD_DELIVERY',
+          total_price: '5000', // ₹50.00 in cents
+          currency: currency || 'INR',
+          description: 'Standard Delivery - 3-5 business days',
+          min_delivery_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          max_delivery_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        },
+        {
+          service_name: 'Express Delivery',
+          service_code: 'EXP_DELIVERY',
+          total_price: '10000', // ₹100.00 in cents
+          currency: currency || 'INR',
+          description: 'Express Delivery - 1-2 business days',
+          min_delivery_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          max_delivery_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        }
+      ];
+    }
+
+    // Sort by price (lowest first)
+    shopifyRates.sort((a, b) => parseInt(a.total_price) - parseInt(b.total_price));
+
+    const responseTime = Date.now() - startTime;
+    console.log('✅ Returning Shopify rates:', shopifyRates.length);
+    console.log('⏱️ Response time:', responseTime, 'ms');
+    console.log('📤 Rates:', JSON.stringify(shopifyRates, null, 2));
+    console.log('='.repeat(80));
+
+    // Set proper headers for Shopify
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('X-Response-Time', responseTime.toString());
+
+    // Return rates (Shopify expects 200 OK with { rates: [...] })
+    return res.status(200).json({ rates: shopifyRates });
+    
+  } catch (error) {
+    const responseTime = Date.now() - startTime;
+    console.error('='.repeat(80));
+    console.error('❌ CarrierService rates error:', error.message);
+    console.error('❌ Error type:', error.constructor.name);
+    console.error('❌ Error stack:', error.stack);
+    console.error('⏱️ Response time before error:', responseTime, 'ms');
+    console.error('='.repeat(80));
+    
+    // Always return empty rates array on error (Shopify expects 200 OK)
+    // Shopify will show "No shipping available" if rates array is empty
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).json({ rates: [] });
+  }
+});
+
 // Apply Shopify authentication to all remaining routes
 router.use(ShopifyShippingController.authenticateShopifyRequest);
 
 // ============================================================================
-// SHOPIFY SHIPPING API ROUTES
+// SHOPIFY SHIPPING API ROUTES (require authentication)
 // ============================================================================
 
 /**
@@ -688,123 +1032,6 @@ router.get('/shipping/config/:userId', async (req, res) => {
  */
 router.get('/shipping/test', async (req, res) => {
   await shippingController.testShippingAPI(req, res);
-});
-
-// ============================================================================
-// SHOPIFY CARRIER SERVICE ROUTES (for native checkout integration)
-// ============================================================================
-
-/**
- * @route POST /api/shopify/carrier/rates
- * @desc CarrierService rates endpoint - Shopify calls this to get shipping rates
- * @access Public (Shopify calls this directly)
- * @body Shopify CarrierService request with rate object
- */
-router.post('/carrier/rates', async (req, res) => {
-  try {
-    console.log('🚚 CarrierService rates request received:', JSON.stringify(req.body, null, 2));
-    
-    // Extract shop domain from headers (Shopify sends this)
-    const shopDomain = req.headers['x-shopify-shop-domain'] || req.headers['x-shopify-shop'];
-    
-    if (!shopDomain) {
-      console.log('❌ No shop domain in request headers');
-      return res.json({ rates: [] });
-    }
-    
-    // Get userId from shop domain
-    let userId = null;
-    try {
-      const AppProxyController = require('../../controllers/shopify/appProxyController');
-      const appProxyController = new AppProxyController();
-      userId = await appProxyController.getUserIdFromShop(shopDomain);
-      console.log('✅ Found userId from shop domain:', userId);
-    } catch (userIdError) {
-      console.error('⚠️ Could not get userId from shop domain:', userIdError.message);
-      // Continue with default - might still work if shop is configured
-    }
-    
-    // Extract data from Shopify's CarrierService request
-    const { rate } = req.body;
-    if (!rate) {
-      console.log('❌ No rate object in request');
-      return res.json({ rates: [] });
-    }
-    
-    const { destination, items, currency, origin } = rate;
-    
-    if (!destination || !destination.postal_code) {
-      console.log('❌ No destination postal code');
-      return res.json({ rates: [] });
-    }
-    
-    // Calculate total weight and value from items
-    let totalWeight = 0;
-    let totalValue = 0;
-    
-    if (items && items.length > 0) {
-      totalWeight = items.reduce((sum, item) => sum + (item.grams || 0), 0) / 1000; // Convert grams to kg
-      totalValue = items.reduce((sum, item) => sum + (item.price || 0), 0) / 100; // Convert cents to currency
-    } else {
-      totalWeight = 0.5; // Default weight
-      totalValue = 0;
-    }
-    
-    console.log('📦 Calculated totals:', { totalWeight, totalValue, postalCode: destination.postal_code, userId, shopDomain });
-    
-    // Prepare request for shipping controller
-    const shippingRequest = {
-      body: {
-        postCode: destination.postal_code,
-        weight: totalWeight,
-        orderAmount: totalValue,
-        paymentMode: 'prepaid',
-        items: items || [],
-        userId: userId || 'default',
-        shopDomain: shopDomain
-      }
-    };
-    
-    // Create a mock response object to capture the controller's response
-    let controllerResponse = null;
-    const mockRes = {
-      json: (data) => { controllerResponse = data; },
-      status: (code) => ({ json: (data) => { controllerResponse = data; } })
-    };
-    
-    // Call the shipping controller
-    await shippingController.calculateShipping(shippingRequest, mockRes);
-
-    // Support both controller shapes:
-    // A) { rates: [...] }  (current controller output)
-    // B) { success: true, data: { shipping_options: [...] } }
-    let shopifyRates = [];
-    if (controllerResponse && Array.isArray(controllerResponse.rates)) {
-      // Already in Shopify format
-      shopifyRates = controllerResponse.rates;
-    } else if (controllerResponse && controllerResponse.success && controllerResponse.data && Array.isArray(controllerResponse.data.shipping_options)) {
-      shopifyRates = controllerResponse.data.shipping_options.map(option => ({
-        service_name: option.service_name,
-        service_code: option.service_code,
-        total_price: option.total_price,
-        currency: 'INR',
-        min_delivery_date: option.min_delivery_date,
-        max_delivery_date: option.max_delivery_date,
-        description: option.description
-      }));
-    } else {
-      console.log('❌ Shipping calculation failed or unexpected shape:', controllerResponse);
-      return res.json({ rates: [] });
-    }
-    
-    console.log('✅ Returning Shopify rates:', shopifyRates.length);
-    
-    res.json({ rates: shopifyRates });
-    
-  } catch (error) {
-    console.error('❌ CarrierService rates error:', error);
-    res.json({ rates: [] });
-  }
 });
 
 // ============================================================================

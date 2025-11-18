@@ -221,7 +221,7 @@ class ModernShopifyService {
     try {
       const client = this.createGraphQLClient(shop, accessToken);
 
-      console.log('🚀 Starting product creation with data:', JSON.stringify(productData, null, 2));
+      // console.log('🚀 Starting product creation with data:', JSON.stringify(productData, null, 2));
 
       // Step 1: Create basic product first (only supported fields in ProductInput for 2025-01)
       const createMutation = `
@@ -254,11 +254,11 @@ class ModernShopifyService {
         descriptionHtml: productData.description || ''
       };
 
-      console.log('Creating product with input:', JSON.stringify(input, null, 2));
+      // console.log('Creating product with input:', JSON.stringify(input, null, 2));
 
       const response = await client.request(createMutation, { variables: { input } });
       
-      console.log('🔍 Product creation response:', JSON.stringify(response, null, 2));
+      // console.log('🔍 Product creation response:', JSON.stringify(response, null, 2));
       
       if (response.errors) {
         throw new Error(`GraphQL errors: ${JSON.stringify(response.errors)}`);
@@ -271,14 +271,14 @@ class ModernShopifyService {
       }
 
       const productId = result.product.id;
-      console.log('✅ Product created with ID:', productId);
+      // console.log('✅ Product created with ID:', productId);
 
       // Step 2: Description is now included in the initial product creation
 
       // Step 2: Add options using REST API
       if (productData.options && productData.options.length > 0) {
         try {
-          console.log('📋 Setting up size options using REST API:', JSON.stringify(productData.options, null, 2));
+          // console.log('📋 Setting up size options using REST API:', JSON.stringify(productData.options, null, 2));
           
           // Update product options using REST API
           const productIdNum = productId.split('/').pop();
@@ -290,11 +290,11 @@ class ModernShopifyService {
               options: productData.options.map(option => ({
                 name: option.name || 'Size',
                 values: option.values
-              }))
-            }
-          };
+            }))
+          }
+        };
 
-          console.log('📋 Updating product options with:', JSON.stringify(optionData, null, 2));
+          // console.log('📋 Updating product options with:', JSON.stringify(optionData, null, 2));
 
           const optionResponse = await fetch(updateUrl, {
             method: 'PUT',
@@ -306,12 +306,12 @@ class ModernShopifyService {
           });
 
           const optionResult = await optionResponse.json();
-          console.log('✅ Product options response:', JSON.stringify(optionResult, null, 2));
+          // console.log('✅ Product options response:', JSON.stringify(optionResult, null, 2));
           
           if (optionResult.product) {
-            console.log('✅ Product options updated successfully');
+            // console.log('✅ Product options updated successfully');
           } else {
-            console.warn('Options update failed:', optionResult);
+            // console.warn('Options update failed:', optionResult);
           }
         } catch (optionError) {
           console.error('❌ Error adding options:', optionError.message);
@@ -322,7 +322,7 @@ class ModernShopifyService {
       // Step 3: Create multiple variants for different sizes using REST API
       if (productData.variants && productData.variants.length > 0) {
         try {
-          console.log('📦 Creating multiple variants for different sizes:', JSON.stringify(productData.variants, null, 2));
+          // console.log('📦 Creating multiple variants for different sizes:', JSON.stringify(productData.variants, null, 2));
           
           // First, delete the default variant
           const getProductQuery = `
@@ -352,7 +352,7 @@ class ModernShopifyService {
               productData.options[0].values[0] : 
               'Small';
             
-            console.log(`📦 Updating first variant for size: ${firstSizeName}`);
+            // console.log(`📦 Updating first variant for size: ${firstSizeName}`);
             
             const updateUrl = `https://${shop}/admin/api/2025-01/variants/${firstVariantId}.json`;
             // Use actual inventoryQuantity from productData, with fallback to 0
@@ -371,7 +371,7 @@ class ModernShopifyService {
               }
             };
 
-            console.log(`📦 Updating first variant with data:`, JSON.stringify(updateData, null, 2));
+            // console.log(`📦 Updating first variant with data:`, JSON.stringify(updateData, null, 2));
 
             const updateResponse = await fetch(updateUrl, {
               method: 'PUT',
@@ -383,10 +383,10 @@ class ModernShopifyService {
             });
 
             const updateResult = await updateResponse.json();
-            console.log(`✅ First variant update response:`, JSON.stringify(updateResult, null, 2));
+            // console.log(`✅ First variant update response:`, JSON.stringify(updateResult, null, 2));
             
             if (updateResult.variant) {
-              console.log(`✅ First variant (${firstSizeName}) updated successfully with price: ${firstVariant.price}`);
+              // console.log(`✅ First variant (${firstSizeName}) updated successfully with price: ${firstVariant.price}`);
               
               // Get location IDs and set inventory for both Canada and India locations
               try {
@@ -397,7 +397,7 @@ class ModernShopifyService {
                   }
                 });
                 const locationsResult = await locationsResponse.json();
-                console.log('📍 Available locations:', JSON.stringify(locationsResult, null, 2));
+                // console.log('📍 Available locations:', JSON.stringify(locationsResult, null, 2));
                 
                 if (locationsResult.locations && locationsResult.locations.length > 0) {
                   // Filter locations for Canada and India (support multiple possible fields from API)
@@ -413,8 +413,8 @@ class ModernShopifyService {
                     ? [...canadaLocations, ...indiaLocations]
                     : locationsResult.locations;
                   
-                  console.log(`📍 Target locations for inventory (Canada: ${canadaLocations.length}, India: ${indiaLocations.length}):`, 
-                    targetLocations.map(loc => `${loc.name} (${loc.country_code})`));
+                  // console.log(`📍 Target locations for inventory (Canada: ${canadaLocations.length}, India: ${indiaLocations.length}):`, 
+                  //   targetLocations.map(loc => `${loc.name} (${loc.country_code})`));
                   
                   // Connect and set inventory for each target location
                   for (const location of targetLocations) {
@@ -426,7 +426,7 @@ class ModernShopifyService {
                         inventory_item_id: updateResult.variant.inventory_item_id
                       };
 
-                      console.log(`🔗 Connecting inventory item to location ${location.name} (${location.country || location.country_code})`);
+                      // console.log(`🔗 Connecting inventory item to location ${location.name} (${location.country || location.country_code})`);
                       const connectResponse = await fetch(connectUrl, {
                         method: 'POST',
                         headers: {
@@ -450,7 +450,7 @@ class ModernShopifyService {
                       available: firstVariantQuantity
                     };
                     
-                    console.log(`📦 Setting inventory at ${location.name} (${location.country || location.country_code}):`, JSON.stringify(inventoryData, null, 2));
+                    // console.log(`📦 Setting inventory at ${location.name} (${location.country || location.country_code}):`, JSON.stringify(inventoryData, null, 2));
                     
                     const inventoryResponse = await fetch(inventoryUrl, {
                       method: 'POST',
@@ -462,10 +462,10 @@ class ModernShopifyService {
                     });
                     
                     const inventoryResult = await inventoryResponse.json();
-                    console.log(`✅ Inventory set response at ${location.name}:`, JSON.stringify(inventoryResult, null, 2));
+                    // console.log(`✅ Inventory set response at ${location.name}:`, JSON.stringify(inventoryResult, null, 2));
                   }
                 } else {
-                  console.warn('⚠️ No locations found');
+                  // console.warn('⚠️ No locations found');
                 }
               } catch (inventoryError) {
                 console.error('❌ Error setting inventory:', inventoryError.message);
@@ -481,7 +481,7 @@ class ModernShopifyService {
                 productData.options[0].values[i] : 
                 `Size ${i + 1}`;
               
-              console.log(`📦 Creating variant ${i + 1} for size: ${sizeName}`);
+              // console.log(`📦 Creating variant ${i + 1} for size: ${sizeName}`);
               
               // Create variant using REST API
               // Use actual inventoryQuantity from variant data, with fallback to 0
@@ -500,7 +500,7 @@ class ModernShopifyService {
                 }
               };
 
-              console.log(`📦 Creating variant ${i + 1} with data:`, JSON.stringify(variantData, null, 2));
+              // console.log(`📦 Creating variant ${i + 1} with data:`, JSON.stringify(variantData, null, 2));
 
               const createResponse = await fetch(createUrl, {
                 method: 'POST',
@@ -512,10 +512,10 @@ class ModernShopifyService {
               });
 
               const createResult = await createResponse.json();
-              console.log(`✅ Variant ${i + 1} creation response:`, JSON.stringify(createResult, null, 2));
+              // console.log(`✅ Variant ${i + 1} creation response:`, JSON.stringify(createResult, null, 2));
               
               if (createResult.variant) {
-                console.log(`✅ Variant ${i + 1} (${sizeName}) created successfully with price: ${variant.price}`);
+                // console.log(`✅ Variant ${i + 1} (${sizeName}) created successfully with price: ${variant.price}`);
                 
                 // Get location IDs and set inventory for both Canada and India locations
                 try {
