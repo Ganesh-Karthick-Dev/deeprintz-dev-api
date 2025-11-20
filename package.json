@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon --no-warnings=ExperimentalWarning ./index.js",
+    "start": "nodemon --no-warnings=ExperimentalWarning ./index.js --host 127.0.0.1 --port 6996",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
