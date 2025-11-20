@@ -29,23 +29,25 @@ redirect_urls = [
 [webhooks]
 api_version = "2024-10"
 
-# Mandatory compliance webhooks for app approval
+# Mandatory compliance webhooks for app approval (GDPR)
+# NOTE: For PRODUCTION, update these URIs to: https://devapi.deeprintz.com/api/deeprintz/live/shopify/webhooks/...
+# For DEV/Testing, update these URIs to your current ngrok URL
 [[webhooks.subscriptions]]
 topics = [ "customers/data_request" ]
-uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerRequest"
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/shopify/webhooks/customers/data_request"
 
 [[webhooks.subscriptions]]
 topics = [ "customers/redact" ]
-uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerDelete"
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/shopify/webhooks/customers/redact"
 
 [[webhooks.subscriptions]]
 topics = [ "shop/redact" ]
-uri = "https://devapi.deeprintz.com/api/deeprintz/live/customerShopDelete"
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/shopify/webhooks/shop/redact"
 
 # Order management webhooks
 [[webhooks.subscriptions]]
 topics = [ "orders/create", "orders/updated", "orders/fulfilled", "orders/partially_fulfilled" ]
-uri = "https://df5b0a4dbe35.ngrok-free.app/api/deeprintz/live/shopify/webhooks/orders"
+uri = "https://devapi.deeprintz.com/api/deeprintz/live/shopify/webhooks/orders"
 
 [pos]
 embedded = false

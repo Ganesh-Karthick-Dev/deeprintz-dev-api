@@ -47,6 +47,11 @@ router.post('/shipping/webhook', modernShopifyController.handleShippingWebhook);
 router.post('/webhooks/orders', shopifyRaw, modernShopifyController.handleOrderWebhook);
 router.post('/orders/webhook', shopifyRaw, modernShopifyController.handleOrderWebhook);
 
+// GDPR Compliance Webhooks (MANDATORY for Shopify App Store)
+router.post('/webhooks/customers/data_request', shopifyRaw, modernShopifyController.handleCustomerDataRequest);
+router.post('/webhooks/customers/redact', shopifyRaw, modernShopifyController.handleCustomerRedact);
+router.post('/webhooks/shop/redact', shopifyRaw, modernShopifyController.handleShopRedact);
+
 // Manual webhook registration (for troubleshooting)
 router.post('/webhooks/register', modernShopifyController.manualRegisterWebhooks);
 

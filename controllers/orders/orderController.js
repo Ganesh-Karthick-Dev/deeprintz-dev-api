@@ -2168,6 +2168,7 @@ module.exports.getAllStoreOrders = async (req, res) => {
             end_date,
             order_number,
             customer_email,
+            order_source, // NEW: Filter by order source (shopify, woocommerce, etc.)
             sort_by = 'date_created',
             sort_order = 'desc'
         } = req.query;
@@ -2177,11 +2178,17 @@ module.exports.getAllStoreOrders = async (req, res) => {
             .select(
                 'wo.*',
                 'ws.store_url',
-                'ws.store_name',
+                'ws.store_name as woo_store_name',
+                'ss.shop_domain as shopify_domain', // Include Shopify domain
+                'ss.shop_name as shopify_shop_name', // Include Shopify shop name (correct column)
                 'au.authname as vendor_username',
                 'au.email as vendor_email'
             )
             .leftJoin('woocommerce_stores as ws', 'wo.vendor_id', 'ws.user_id')
+            .leftJoin('shopify_stores as ss', function() {
+                this.on('wo.vendor_id', 'ss.vendor_id')
+                    .andOn('wo.order_source', global.dbConnection.raw('?', ['shopify']))
+            })
             .leftJoin('app_users as au', 'wo.vendor_id', 'au.userid')
             .groupBy('wo.id'); // Group by order ID to prevent duplicates from JOINs
 
@@ -2192,6 +2199,11 @@ module.exports.getAllStoreOrders = async (req, res) => {
 
         if (vendor_id) {
             query = query.where('wo.vendor_id', vendor_id);
+        }
+
+        // NEW: Filter by order source (shopify, woocommerce)
+        if (order_source) {
+            query = query.where('wo.order_source', order_source);
         }
 
         if (store_url) {
@@ -2217,6 +2229,10 @@ module.exports.getAllStoreOrders = async (req, res) => {
         // Get total count for pagination - Use a separate count query to avoid JOIN issues
         const totalCountQuery = global.dbConnection('woocommerce_orders as wo')
             .leftJoin('woocommerce_stores as ws', 'wo.vendor_id', 'ws.user_id')
+            .leftJoin('shopify_stores as ss', function() {
+                this.on('wo.vendor_id', 'ss.vendor_id')
+                    .andOn('wo.order_source', global.dbConnection.raw('?', ['shopify']))
+            })
             .leftJoin('app_users as au', 'wo.vendor_id', 'au.userid');
 
         // Apply the same filters to count query
@@ -2225,6 +2241,9 @@ module.exports.getAllStoreOrders = async (req, res) => {
         }
         if (vendor_id) {
             totalCountQuery.where('wo.vendor_id', vendor_id);
+        }
+        if (order_source) {
+            totalCountQuery.where('wo.order_source', order_source);
         }
         if (store_url) {
             totalCountQuery.where('ws.store_url', 'like', `%${store_url}%`);
@@ -2481,6 +2500,7 @@ module.exports.getAllStoreOrders = async (req, res) => {
                 status,
                 vendor_id,
                 store_url,
+                order_source, // NEW: Include order_source in response
                 start_date,
                 end_date,
                 order_number,

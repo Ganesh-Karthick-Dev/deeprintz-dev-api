@@ -65,9 +65,9 @@ router.get('/app-proxy/shipping/script', async (req, res) => {
         
         console.log('🚀 Initializing Deeprintz Shipping Integration');
         
-        // Configuration
+        // Configuration - uses dynamic API base URL
         const config = {
-          apiBaseUrl: 'https://devapi.deeprintz.com/api/deeprintz/live/shopify',
+          apiBaseUrl: '${SHOPIFY_CONFIG.API_BASE}/shopify',
           userId: '${userId}',
           shop: '${shop}',
           debug: true

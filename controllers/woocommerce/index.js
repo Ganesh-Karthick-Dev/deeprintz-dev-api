@@ -1001,6 +1001,63 @@ module.exports.getConnectionStatus = async (req, res) => {
   }
 };
 
+// Get plugin configuration for a store (used by WordPress plugin)
+module.exports.getPluginConfig = async (req, res) => {
+  try {
+    const { store_url } = req.query;
+
+    if (!store_url) {
+      return res.status(400).json({
+        success: false,
+        message: "Store URL is required"
+      });
+    }
+
+    // Normalize store URL
+    let normalizedStoreUrl = store_url.trim();
+    if (!normalizedStoreUrl.startsWith('http://') && !normalizedStoreUrl.startsWith('https://')) {
+      normalizedStoreUrl = 'https://' + normalizedStoreUrl;
+    }
+    normalizedStoreUrl = normalizedStoreUrl.replace(/\/$/, ''); // Remove trailing slash
+
+    // Get store from database
+    const store = await global.dbConnection('woocommerce_stores')
+      .where('store_url', normalizedStoreUrl)
+      .orWhere('store_url', normalizedStoreUrl + '/')
+      .where('status', 'connected')
+      .first();
+
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found or not connected"
+      });
+    }
+
+    // Get API base URL from config
+    const SHOPIFY_CONFIG = require('../../config/shopify');
+    const apiBaseUrl = `${SHOPIFY_CONFIG.BASE_URL}/api/woocommerce`;
+
+    // Return plugin configuration
+    return res.json({
+      success: true,
+      data: {
+        apiBaseUrl: apiBaseUrl,
+        userId: store.user_id || store.vendor_id,
+        storeId: store.id
+      }
+    });
+
+  } catch (error) {
+    console.error("Error getting plugin config:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get plugin config",
+      error: error.message
+    });
+  }
+};
+
 // Update WordPress credentials for existing WooCommerce store
 module.exports.updateWordPressCredentials = async (req, res) => {
   try {
@@ -3597,19 +3654,117 @@ if (!defined('ABSPATH')) {
 }
 
 class CourierShippingIntegration {
-    private $apiBaseUrl = 'https://devdevapi.deeprintz.com/api/woocommerce';
-    private $userId = '${userId}';
-    private $storeId = '${store.id}';
+    private $optionName = 'deeprintz_courier_shipping_config';
+    private $apiBaseUrl = null;
+    private $userId = null;
+    private $storeId = null;
     
     public function __construct() {
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('wp_footer', array($this, 'add_inline_script'));
         add_action('woocommerce_shipping_init', array($this, 'init_shipping_method'));
         add_filter('woocommerce_shipping_methods', array($this, 'add_shipping_method'));
+        add_action('admin_init', array($this, 'maybe_fetch_config'));
+        register_activation_hook(__FILE__, array($this, 'activate_plugin'));
+        
+        // Load config from WordPress options
+        $this->load_config();
+    }
+    
+    public function activate_plugin() {
+        // Fetch config on activation
+        $this->fetch_config_from_api();
+    }
+    
+    private function load_config() {
+        $config = get_option($this->optionName);
+        if ($config) {
+            $this->apiBaseUrl = $config['apiBaseUrl'];
+            $this->userId = $config['userId'];
+            $this->storeId = $config['storeId'];
+        } else {
+            // Try to fetch if not cached
+            $this->fetch_config_from_api();
+        }
+    }
+    
+    public function maybe_fetch_config() {
+        // Fetch config if not set or if it's been more than 24 hours
+        $lastFetch = get_option($this->optionName . '_last_fetch', 0);
+        if (empty($this->apiBaseUrl) || (time() - $lastFetch) > 86400) {
+            $this->fetch_config_from_api();
+        }
+    }
+    
+    private function fetch_config_from_api() {
+        try {
+            $storeUrl = home_url();
+            // Use WordPress constant if defined, otherwise use default
+            $configBaseUrl = defined('DEEPRINTZ_API_BASE_URL') 
+                ? DEEPRINTZ_API_BASE_URL 
+                : 'https://devdevapi.deeprintz.com';
+            $configApiUrl = $configBaseUrl . '/api/woocommerce/plugin-config';
+            
+            $response = wp_remote_get($configApiUrl . '?store_url=' . urlencode($storeUrl), array(
+                'timeout' => 10,
+                'sslverify' => true
+            ));
+            
+            if (is_wp_error($response)) {
+                error_log('Deeprintz Shipping: Failed to fetch config - ' . $response->get_error_message());
+                return;
+            }
+            
+            $body = wp_remote_retrieve_body($response);
+            $data = json_decode($body, true);
+            
+            if ($data && $data['success'] && $data['data']) {
+                $config = array(
+                    'apiBaseUrl' => $data['data']['apiBaseUrl'],
+                    'userId' => $data['data']['userId'],
+                    'storeId' => $data['data']['storeId']
+                );
+                
+                update_option($this->optionName, $config);
+                update_option($this->optionName . '_last_fetch', time());
+                
+                $this->apiBaseUrl = $config['apiBaseUrl'];
+                $this->userId = $config['userId'];
+                $this->storeId = $config['storeId'];
+                
+                error_log('Deeprintz Shipping: Config fetched successfully');
+            } else {
+                error_log('Deeprintz Shipping: Invalid config response from API');
+            }
+        } catch (Exception $e) {
+            error_log('Deeprintz Shipping: Error fetching config - ' . $e->getMessage());
+        }
+    }
+    
+    private function get_api_base_url() {
+        if (!$this->apiBaseUrl) {
+            $this->load_config();
+        }
+        return $this->apiBaseUrl ? $this->apiBaseUrl : 'https://devdevapi.deeprintz.com/api/woocommerce';
+    }
+    
+    private function get_user_id() {
+        if (!$this->userId) {
+            $this->load_config();
+        }
+        return $this->userId ? $this->userId : '';
+    }
+    
+    private function get_store_id() {
+        if (!$this->storeId) {
+            $this->load_config();
+        }
+        return $this->storeId ? $this->storeId : '';
     }
     
     public function init_shipping_method() {
-        require_once plugin_dir_path(__FILE__) . 'class-courier-shipping-method.php';
+        // Class is defined in this same file below, no need to require
+        // The WC_Courier_Shipping_Method class will be loaded automatically
     }
     
     public function add_shipping_method($methods) {
@@ -3832,7 +3987,7 @@ class CourierShippingIntegration {
                                 return;
                             }
                             
-                            const response = await fetch(\`\${this.config.apiBaseUrl}/woocommerce/shipping/calculate\`, {
+                            const response = await fetch(\`\${this.config.apiBaseUrl}/shipping/calculate\`, {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -4112,9 +4267,9 @@ class CourierShippingIntegration {
                 // Initialize the checkout shipping integration
                 $(document).ready(function() {
                     const config = {
-                        apiBaseUrl: 'https://devdevapi.deeprintz.com/api/woocommerce',
-                        userId: '${userId}',
-                        storeId: '${store.id}'
+                        apiBaseUrl: '<?php echo esc_js($this->get_api_base_url()); ?>',
+                        userId: '<?php echo esc_js($this->get_user_id()); ?>',
+                        storeId: '<?php echo esc_js($this->get_store_id()); ?>'
                     };
                     
                     window.wooCheckoutShipping = new WooCommerceCheckoutShipping(config);
@@ -4214,7 +4369,13 @@ class WC_Courier_Shipping_Method extends WC_Shipping_Method {
     }
     
     private function get_shipping_rates_from_api($postcode, $weight, $total) {
-        $api_url = 'https://devdevapi.deeprintz.com/api/woocommerce/shipping/calculate';
+        // Get API URL from WordPress options (set by main plugin class)
+        $config = get_option('deeprintz_courier_shipping_config');
+        $apiBaseUrl = $config && isset($config['apiBaseUrl']) 
+            ? $config['apiBaseUrl'] 
+            : 'https://devdevapi.deeprintz.com/api/woocommerce';
+        
+        $api_url = $apiBaseUrl . '/shipping/calculate';
         
         $request_data = array(
             'postCode' => $postcode,
@@ -4256,6 +4417,9 @@ new CourierShippingIntegration();
     content: pluginContent
   };
 }
+
+// Export for use in export script
+module.exports.createEnhancedShippingPlugin = createEnhancedShippingPlugin;
 
 // Inject enhanced shipping script directly (fallback method)
 async function injectEnhancedShippingScript(WooCommerce, store, userId) {

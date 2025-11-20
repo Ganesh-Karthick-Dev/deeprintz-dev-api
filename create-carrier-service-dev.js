@@ -12,15 +12,15 @@
 const axios = require('axios');
 
 // Configuration
+const SHOPIFY_CONFIG = require('./config/shopify');
+
 const CONFIG = {
   SHOP_DOMAIN: 'mayu-12351.myshopify.com',
   USER_ID: 2004,
-  NGROK_URL: 'https://df5b0a4dbe35.ngrok-free.app',
-  ENVIRONMENT: 'dev'
 };
 
-// Get correct callback URL for dev
-const CALLBACK_URL = `${CONFIG.NGROK_URL}/api/deeprintz/${CONFIG.ENVIRONMENT}/shopify/carrier/rates`;
+// Get correct callback URL from config
+const CALLBACK_URL = SHOPIFY_CONFIG.CARRIER_SERVICE_URL;
 
 console.log('🆕 CREATING NEW CARRIER SERVICE FOR DEV');
 console.log('='.repeat(80));
@@ -268,4 +268,5 @@ if (require.main === module) {
 }
 
 module.exports = { main };
+
 

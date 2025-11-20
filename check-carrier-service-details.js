@@ -6,10 +6,10 @@
  */
 
 const axios = require('axios');
+const SHOPIFY_CONFIG = require('./config/shopify');
 
 const CONFIG = {
   SHOP_DOMAIN: 'mayu-12351.myshopify.com',
-  ENVIRONMENT: 'dev'
 };
 
 async function checkCarrierService() {
@@ -91,12 +91,12 @@ async function checkCarrierService() {
     console.log('='.repeat(80));
     console.log('');
     console.log('🎯 EXPECTED CALLBACK URL FOR DEV:');
-    console.log('   https://df5b0a4dbe35.ngrok-free.app/api/deeprintz/dev/shopify/carrier/rates');
+    console.log('   ' + SHOPIFY_CONFIG.CARRIER_SERVICE_URL);
     console.log('');
     
     // Check if any service has the correct URL
     const correctService = services.find(e => 
-      e.node.callbackUrl === 'https://df5b0a4dbe35.ngrok-free.app/api/deeprintz/dev/shopify/carrier/rates'
+      e.node.callbackUrl === SHOPIFY_CONFIG.CARRIER_SERVICE_URL
     );
     
     if (correctService) {

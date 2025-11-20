@@ -18,6 +18,7 @@ router.post('/push-products', woocommerceController.pushProductsToWooCommerce);
 
 // Store management
 router.get('/stores', woocommerceController.getVendorStores);
+router.get('/plugin-config', woocommerceController.getPluginConfig);
 
 // Order management
 router.get('/orders/vendor/:vendor_id', woocommerceController.getVendorOrders);

@@ -27,6 +27,10 @@ class ModernShopifyController {
     this.manualRegisterWebhooks = this.manualRegisterWebhooks.bind(this);
     this.manualRegisterCarrierService = this.manualRegisterCarrierService.bind(this);
     this.listCarrierServices = this.listCarrierServices.bind(this);
+    // GDPR Compliance Webhooks
+    this.handleCustomerDataRequest = this.handleCustomerDataRequest.bind(this);
+    this.handleCustomerRedact = this.handleCustomerRedact.bind(this);
+    this.handleShopRedact = this.handleShopRedact.bind(this);
   }
 
   // Safely parse a date-like value to a JS Date; fallback to now
@@ -156,12 +160,20 @@ class ModernShopifyController {
 
       const orderPayload = req.body || {};
 
+      // Get the LATEST connected shop (in case there are multiple connections)
       const shopRow = await global.dbConnection('shopify_stores')
         .where('shop_domain', shopDomain)
         .where('status', 'connected')
+        .orderBy('id', 'desc') // Get the latest connection
         .first();
 
       const vendorId = shopRow?.vendor_id || 0;
+      
+      console.log('🏪 Shop lookup:', { 
+        shop: shopDomain, 
+        vendor_id: vendorId,
+        shop_id: shopRow?.id 
+      });
 
       await this.ensureWooCommerceOrdersTable();
       await this.ensureWooCommerceOrderItemsTable();
@@ -549,8 +561,10 @@ class ModernShopifyController {
             delete req.session.shopify_userid;
           }
 
-          // Redirect to success page or frontend
-          return res.redirect(`${SHOPIFY_CONFIG.SUCCESS_REDIRECT_URL}?shop=${session.shop}`);
+          // Redirect to frontend with success status and shop details
+          const redirectUrl = `${SHOPIFY_CONFIG.SUCCESS_REDIRECT_URL}?success=true&platform=shopify&shop=${encodeURIComponent(session.shop)}&userId=${userId}`;
+          console.log('✅ OAuth complete! Redirecting to frontend:', redirectUrl);
+          return res.redirect(redirectUrl);
         } else {
           return res.status(400).json({
             success: false,
@@ -956,28 +970,24 @@ class ModernShopifyController {
         query = query.where('shop_domain', shopDomain);
       }
 
-      // Get shops before disconnecting for response
+      // Get shops before deleting for response
       const shops = await query.clone().select('shop_domain', 'shop_name');
 
-      // Disconnect shop(s) - don't set access_token to null (column doesn't allow null)
-      // Just update status to disconnected
-      const result = await query.update({
-        status: 'disconnected',
-        updated_at: new Date()
-      });
+      // Delete the shop connection row completely - allows users to reconnect later
+      const result = await query.del();
 
       if (result > 0) {
         res.json({
           success: true,
-          message: shopDomain 
-            ? 'Shop disconnected successfully' 
-            : `${result} shop(s) disconnected successfully`,
-          disconnected_shops: shops.map(s => s.shop_domain)
+          message: shopDomain
+            ? 'Shop connection removed successfully - you can reconnect anytime'
+            : `${result} shop connection(s) removed successfully - you can reconnect anytime`,
+          deleted_shops: shops.map(s => s.shop_domain)
         });
       } else {
         res.status(400).json({
           success: false,
-          message: 'Shop not found or already disconnected'
+          message: 'Shop connection not found or already removed'
         });
       }
     } catch (error) {
@@ -1155,9 +1165,18 @@ class ModernShopifyController {
           variantsBySize[size].variants.push(variant);
           
           // Sum quantities for all variants of this size
+          // Handle negative values and null by setting to 0
           const qty = variant.quantity;
           if (qty !== null && qty !== undefined) {
-            variantsBySize[size].totalQuantity += Math.max(0, parseInt(qty) || 0);
+            const parsedQty = parseInt(qty) || 0;
+            const safeQty = Math.max(0, parsedQty); // Convert negative to 0
+            variantsBySize[size].totalQuantity += safeQty;
+            
+            if (parsedQty < 0) {
+              console.log(`⚠️ Negative quantity ${parsedQty} for variant ${variant.variantid} converted to 0`);
+            }
+          } else {
+            console.log(`⚠️ NULL/undefined quantity for variant ${variant.variantid} - using 0`);
           }
           
           // Use the first non-zero retailPrice found for this size
@@ -1187,7 +1206,7 @@ class ModernShopifyController {
           const sku = `DP-${product.deeprintzProductId}-${sizeGroup.sizesku || size}-${Date.now()}`;
           const quantity = sizeGroup.totalQuantity;
 
-          // console.log(`📦 Creating variant for size ${size}: Price: ${price} - SKU: ${sku} - Total Quantity: ${quantity} (from ${sizeGroup.variants.length} color variants)`);
+          console.log(`📦 Creating variant for size ${size}: Price: ₹${price} - SKU: ${sku} - Inventory: ${quantity} (from ${sizeGroup.variants.length} DB variants)`);
 
           return {
             price: price.toString(),
@@ -1199,12 +1218,22 @@ class ModernShopifyController {
         // Simple product without variants (use original price as INR)
         const price = product.variants?.[0]?.retailPrice || product.shopifyProductCost || "0";
         const sku = `DP-${product.deeprintzProductId}-${Date.now()}`;
-        // Use actual quantity from first variant if available, otherwise 0
-        const quantity = product.variants?.[0]?.quantity !== null && product.variants?.[0]?.quantity !== undefined
-          ? Math.max(0, parseInt(product.variants[0].quantity) || 0)
-          : 0;
+        
+        // Use actual quantity from database, handle negative/null values
+        let quantity = 0;
+        const dbQty = product.variants?.[0]?.quantity;
+        if (dbQty !== null && dbQty !== undefined) {
+          const parsedQty = parseInt(dbQty) || 0;
+          quantity = Math.max(0, parsedQty); // Convert negative to 0
+          
+          if (parsedQty < 0) {
+            console.log(`⚠️ Negative quantity ${parsedQty} for simple product converted to 0`);
+          }
+        } else {
+          console.log(`⚠️ NULL/undefined quantity for simple product - using 0`);
+        }
 
-        // console.log(`📦 Creating simple product - INR Price: ${price} - SKU: ${sku} - Quantity: ${quantity}`);
+        console.log(`📦 Creating simple product - Price: ${price} - SKU: ${sku} - Inventory: ${quantity}`);
 
         shopifyProductData.variants = [{
           price: price.toString(),
@@ -2926,5 +2955,210 @@ ModernShopifyController.prototype.ensureWooCommerceOrderItemsTable = async funct
   }
 };
 
+// ============================================================================
+// GDPR COMPLIANCE WEBHOOKS (MANDATORY FOR SHOPIFY APP STORE)
+// ============================================================================
+
+/**
+ * Handle customer data request webhook (GDPR compliance)
+ * Topic: customers/data_request
+ * 
+ * When a customer requests their data, Shopify sends this webhook.
+ * You must return the customer's data within 30 days.
+ */
+ModernShopifyController.prototype.handleCustomerDataRequest = async function(req, res) {
+    try {
+      console.log('📋 GDPR: Customer data request received');
+      
+      // Validate HMAC signature
+      const signature = req.headers['x-shopify-hmac-sha256'];
+      const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+      const valid = this.shopifyService.validateWebhookSignature(rawBody, signature || '', SHOPIFY_CONFIG.SECRET);
+      
+      if (!valid) {
+        console.warn('⚠️ Invalid HMAC signature for customer data request');
+        // Still return 200 OK to acknowledge receipt
+      }
+
+      const payload = req.body;
+      console.log('📦 Customer data request payload:', {
+        shop_id: payload.shop_id,
+        shop_domain: payload.shop_domain,
+        customer_id: payload.customer?.id,
+        customer_email: payload.customer?.email
+      });
+
+      // Log the data request for compliance tracking
+      try {
+        await global.dbConnection('shopify_gdpr_requests').insert({
+          request_type: 'data_request',
+          shop_id: payload.shop_id || null,
+          shop_domain: payload.shop_domain || null,
+          customer_id: payload.customer?.id || null,
+          customer_email: payload.customer?.email || null,
+          payload: JSON.stringify(payload),
+          status: 'pending',
+          created_at: new Date()
+        });
+        console.log('✅ Customer data request logged to database');
+      } catch (dbError) {
+        console.error('❌ Error logging data request:', dbError.message);
+      }
+
+      // Respond immediately with 200 OK (Shopify requirement)
+      return res.status(200).send();
+    } catch (error) {
+      console.error('❌ Error in handleCustomerDataRequest:', error);
+      return res.status(200).send(); // Always return 200
+    }
+};
+
+/**
+ * Handle customer redact webhook (GDPR compliance)
+ * Topic: customers/redact
+ * 
+ * When a customer requests deletion of their data, Shopify sends this webhook.
+ * You must delete/anonymize customer data within 30 days.
+ */
+ModernShopifyController.prototype.handleCustomerRedact = async function(req, res) {
+    try {
+      console.log('🗑️ GDPR: Customer redact request received');
+      
+      // Validate HMAC signature
+      const signature = req.headers['x-shopify-hmac-sha256'];
+      const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+      const valid = this.shopifyService.validateWebhookSignature(rawBody, signature || '', SHOPIFY_CONFIG.SECRET);
+      
+      if (!valid) {
+        console.warn('⚠️ Invalid HMAC signature for customer redact');
+      }
+
+      const payload = req.body;
+      console.log('📦 Customer redact payload:', {
+        shop_id: payload.shop_id,
+        shop_domain: payload.shop_domain,
+        customer_id: payload.customer?.id,
+        customer_email: payload.customer?.email
+      });
+
+      // Log the redaction request
+      try {
+        await global.dbConnection('shopify_gdpr_requests').insert({
+          request_type: 'customer_redact',
+          shop_id: payload.shop_id || null,
+          shop_domain: payload.shop_domain || null,
+          customer_id: payload.customer?.id || null,
+          customer_email: payload.customer?.email || null,
+          payload: JSON.stringify(payload),
+          status: 'pending',
+          created_at: new Date()
+        });
+        console.log('✅ Customer redact request logged to database');
+
+        // Anonymize customer data in orders (if any)
+        if (payload.customer?.email) {
+          const updated = await global.dbConnection('woocommerce_orders')
+            .where('customer_email', payload.customer.email)
+            .where('order_source', 'shopify')
+            .update({
+              customer_email: 'redacted@privacy.shopify.com',
+              customer_phone: null,
+              shipping_address: JSON.stringify({ redacted: true }),
+              billing_address: JSON.stringify({ redacted: true }),
+              updated_at: new Date()
+            });
+          console.log(`✅ Anonymized ${updated} customer records`);
+        }
+      } catch (dbError) {
+        console.error('❌ Error processing customer redact:', dbError.message);
+      }
+
+      // Respond immediately with 200 OK
+      return res.status(200).send();
+    } catch (error) {
+      console.error('❌ Error in handleCustomerRedact:', error);
+      return res.status(200).send();
+    }
+};
+
+/**
+ * Handle shop redact webhook (GDPR compliance)
+ * Topic: shop/redact
+ * 
+ * 48 hours after a shop uninstalls your app, Shopify sends this webhook.
+ * You must delete all shop data except for:
+ * - Order IDs, financial transaction IDs
+ * - Data required for legal/regulatory compliance
+ */
+ModernShopifyController.prototype.handleShopRedact = async function(req, res) {
+    try {
+      console.log('🗑️ GDPR: Shop redact request received (48h after uninstall)');
+      
+      // Validate HMAC signature
+      const signature = req.headers['x-shopify-hmac-sha256'];
+      const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+      const valid = this.shopifyService.validateWebhookSignature(rawBody, signature || '', SHOPIFY_CONFIG.SECRET);
+      
+      if (!valid) {
+        console.warn('⚠️ Invalid HMAC signature for shop redact');
+      }
+
+      const payload = req.body;
+      console.log('📦 Shop redact payload:', {
+        shop_id: payload.shop_id,
+        shop_domain: payload.shop_domain
+      });
+
+      // Log the shop redaction request
+      try {
+        await global.dbConnection('shopify_gdpr_requests').insert({
+          request_type: 'shop_redact',
+          shop_id: payload.shop_id || null,
+          shop_domain: payload.shop_domain || null,
+          payload: JSON.stringify(payload),
+          status: 'pending',
+          created_at: new Date()
+        });
+        console.log('✅ Shop redact request logged to database');
+
+        // Delete/anonymize shop data
+        if (payload.shop_domain) {
+          // Mark shop connection as deleted (don't actually delete for audit purposes)
+          await global.dbConnection('shopify_stores')
+            .where('shop_domain', payload.shop_domain)
+            .update({
+              status: 'redacted',
+              access_token: null, // Remove access token
+              shop_name: 'REDACTED',
+              shop_email: null,
+              shop_owner: null,
+              updated_at: new Date()
+            });
+          console.log('✅ Shop data anonymized');
+
+          // Anonymize customer data in orders from this shop
+          const updated = await global.dbConnection('woocommerce_orders')
+            .where('shopify_domain', payload.shop_domain)
+            .where('order_source', 'shopify')
+            .update({
+              customer_email: 'redacted@privacy.shopify.com',
+              customer_phone: null,
+              shipping_address: JSON.stringify({ redacted: true }),
+              billing_address: JSON.stringify({ redacted: true }),
+              updated_at: new Date()
+            });
+          console.log(`✅ Anonymized ${updated} order records from shop`);
+        }
+      } catch (dbError) {
+        console.error('❌ Error processing shop redact:', dbError.message);
+      }
+
+      // Respond immediately with 200 OK
+      return res.status(200).send();
+    } catch (error) {
+      console.error('❌ Error in handleShopRedact:', error);
+      return res.status(200).send();
+    }
+};
 
 module.exports = new ModernShopifyController();

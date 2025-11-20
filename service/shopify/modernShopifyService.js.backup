@@ -221,52 +221,9 @@ class ModernShopifyService {
     try {
       const client = this.createGraphQLClient(shop, accessToken);
 
-      console.log('🚀 Starting 100% GraphQL product creation (API 2025-10)');
-      console.log('📦 Product data:', JSON.stringify(productData, null, 2));
+      // console.log('🚀 Starting product creation with data:', JSON.stringify(productData, null, 2));
 
-      // Step 1: Prepare product variants with options
-      const productVariants = [];
-      const productOptions = [];
-      
-      if (productData.options && productData.options.length > 0 && productData.variants && productData.variants.length > 0) {
-        // Define options (e.g., Size: Small, Medium, Large)
-        // In 2025-10 API, option values must be objects, not strings
-        productOptions.push({
-          name: productData.options[0].name || 'Size',
-          values: (productData.options[0].values || []).map(value => ({ name: value }))
-        });
-
-        // For 2025-10 API, variants are not part of ProductInput anymore
-        // We'll create them separately after product creation
-        productData.variants.forEach((variant, index) => {
-          const sizeName = productData.options[0].values[index] || `Size ${index + 1}`;
-          const variantQuantity = variant.inventoryQuantity !== null && variant.inventoryQuantity !== undefined
-            ? Math.max(0, parseInt(variant.inventoryQuantity) || 0)
-            : 0;
-
-          console.log(`📊 Processing variant ${index} (${sizeName}): Price=${variant.price}, SKU=${variant.sku}, Quantity from DB=${variant.inventoryQuantity} → Safe Quantity=${variantQuantity}`);
-
-          productVariants.push({
-            optionValues: [
-              {
-                optionName: productData.options[0].name || 'Size',
-                name: sizeName
-              }
-            ],
-            price: parseFloat(variant.price) || 500.00,
-            sku: variant.sku || '',
-            inventoryPolicy: 'CONTINUE',
-            inventoryQuantities: {
-              availableQuantity: variantQuantity,
-              locationId: null
-            }
-          });
-        });
-        
-        console.log(`✅ Prepared ${productVariants.length} variants for creation with inventory data`);
-      }
-
-      // Step 2: Create product with variants using GraphQL mutation
+      // Step 1: Create basic product first (only supported fields in ProductInput for 2025-01)
       const createMutation = `
         mutation productCreate($input: ProductInput!) {
           productCreate(input: $input) {
@@ -278,25 +235,6 @@ class ModernShopifyService {
               productType
               vendor
               tags
-              descriptionHtml
-              options {
-                id
-                name
-                values
-              }
-              variants(first: 50) {
-                edges {
-                  node {
-                    id
-                    title
-                    price
-                    sku
-                    inventoryItem {
-                      id
-                    }
-                  }
-                }
-              }
             }
             userErrors {
               field
@@ -306,7 +244,8 @@ class ModernShopifyService {
         }
       `;
 
-      const productInput = {
+      // Basic product input (only fields supported in ProductInput for 2025-01)
+      const input = {
         title: productData.title,
         productType: productData.productType || 'Print-on-Demand',
         vendor: productData.vendor || 'Deeprintz',
@@ -315,18 +254,11 @@ class ModernShopifyService {
         descriptionHtml: productData.description || ''
       };
 
-      // Add options if provided
-      if (productOptions.length > 0) {
-        productInput.productOptions = productOptions;
-      }
+      // console.log('Creating product with input:', JSON.stringify(input, null, 2));
 
-      // In 2025-10 API, variants can be included in productCreate using variants field
-      // But we need to create them after product creation using productVariantsBulkCreate
-      // with the correct input structure
-
-      console.log('📤 Creating product with GraphQL:', JSON.stringify(productInput, null, 2));
-
-      const response = await client.request(createMutation, { variables: { input: productInput } });
+      const response = await client.request(createMutation, { variables: { input } });
+      
+      // console.log('🔍 Product creation response:', JSON.stringify(response, null, 2));
       
       if (response.errors) {
         throw new Error(`GraphQL errors: ${JSON.stringify(response.errors)}`);
@@ -338,365 +270,352 @@ class ModernShopifyService {
         throw new Error(`Product creation errors: ${JSON.stringify(result.userErrors)}`);
       }
 
-      const product = result.product;
-      const productId = product.id;
-      console.log('✅ Product created with ID:', productId);
-      console.log('✅ Product has', product.variants.edges.length, 'default variants');
+      const productId = result.product.id;
+      // console.log('✅ Product created with ID:', productId);
 
-      // Step 3: Delete default variant using productVariantsBulkDelete
-      // Shopify creates a default variant automatically - we need to delete it first
-      // Reference: https://shopify.dev/docs/api/admin-graphql/latest/mutations/productvariantsbulkdelete
-      if (product.variants.edges.length > 0 && productVariants.length > 0) {
+      // Step 2: Description is now included in the initial product creation
+
+      // Step 2: Add options using REST API
+      if (productData.options && productData.options.length > 0) {
         try {
-          const defaultVariant = product.variants.edges[0].node;
-          console.log('🗑️ Deleting default variant using productVariantsBulkDelete:', defaultVariant.id);
+          // console.log('📋 Setting up size options using REST API:', JSON.stringify(productData.options, null, 2));
           
-          const deleteVariantMutation = `
-            mutation productVariantsBulkDelete($productId: ID!, $variantsIds: [ID!]!) {
-              productVariantsBulkDelete(productId: $productId, variantsIds: $variantsIds) {
-                product {
-                  id
-                }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-          `;
+          // Update product options using REST API
+          const productIdNum = productId.split('/').pop();
+          const updateUrl = `https://${shop}/admin/api/2025-01/products/${productIdNum}.json`;
+          
+          const optionData = {
+            product: {
+              id: productIdNum,
+              options: productData.options.map(option => ({
+                name: option.name || 'Size',
+                values: option.values
+            }))
+          }
+        };
 
-          const deleteResponse = await client.request(deleteVariantMutation, {
-            variables: {
-              productId: productId,
-              variantsIds: [defaultVariant.id]
-            }
+          // console.log('📋 Updating product options with:', JSON.stringify(optionData, null, 2));
+
+          const optionResponse = await fetch(updateUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Shopify-Access-Token': accessToken
+            },
+            body: JSON.stringify(optionData)
           });
 
-          if (deleteResponse.data?.productVariantsBulkDelete?.userErrors?.length > 0) {
-            console.warn('⚠️ Failed to delete default variant:', deleteResponse.data.productVariantsBulkDelete.userErrors);
+          const optionResult = await optionResponse.json();
+          // console.log('✅ Product options response:', JSON.stringify(optionResult, null, 2));
+          
+          if (optionResult.product) {
+            // console.log('✅ Product options updated successfully');
           } else {
-            console.log('✅ Default variant deleted successfully');
-            // Clear the variants array since we deleted the default one
-            product.variants.edges = [];
+            // console.warn('Options update failed:', optionResult);
           }
-        } catch (deleteError) {
-          console.warn('⚠️ Error deleting default variant:', deleteError.message);
-          // Continue anyway - we'll try to create all variants
+        } catch (optionError) {
+          console.error('❌ Error adding options:', optionError.message);
+          console.error('Options error details:', optionError);
         }
       }
 
-      // Step 4: Create ALL variants using productVariantsBulkCreate (2025-10 API)
-      // Now that we deleted the default variant, we can create all variants fresh
-      if (productVariants.length > 0) {
+      // Step 3: Create multiple variants for different sizes using REST API
+      if (productData.variants && productData.variants.length > 0) {
         try {
-          console.log('🔄 Creating all variants using productVariantsBulkCreate...');
-
-          // First, query the product to get option IDs
-          const productQuery = `
-            query getProductOptions($id: ID!) {
+          // console.log('📦 Creating multiple variants for different sizes:', JSON.stringify(productData.variants, null, 2));
+          
+          // First, delete the default variant
+          const getProductQuery = `
+            query getProduct($id: ID!) {
               product(id: $id) {
-                id
-                options {
-                  id
-                  name
-                  position
-                  optionValues {
-                    id
-                    name
+                variants(first: 10) {
+                  edges {
+                    node {
+                      id
+                    }
                   }
                 }
               }
             }
           `;
 
-          const productOptionsResponse = await client.request(productQuery, {
+          const productResponse = await client.request(getProductQuery, {
             variables: { id: productId }
           });
 
-          if (productOptionsResponse.errors) {
-            throw new Error(`Failed to query product options: ${JSON.stringify(productOptionsResponse.errors)}`);
-          }
-
-          const productOptions = productOptionsResponse.data.product.options;
-          console.log('📋 Product options:', JSON.stringify(productOptions, null, 2));
-
-          if (productOptions.length === 0) {
-            throw new Error('Product has no options defined');
-          }
-
-          // Get the first option (Size) and its option values
-          const sizeOption = productOptions[0];
-          const sizeOptionValues = sizeOption.optionValues;
-
-          if (sizeOptionValues.length === 0) {
-            throw new Error('Size option has no values');
-          }
-
-          const variantsBulkCreateMutation = `
-            mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-              productVariantsBulkCreate(productId: $productId, variants: $variants) {
-                productVariants {
-                  id
-                  title
-                  price
-                  sku
-                  inventoryItem {
-                    id
-                  }
-                  selectedOptions {
-                    name
-                    value
-                  }
-                }
-                userErrors {
-                  field
-                  message
-                }
+          // Update the first variant and create additional variants
+          if (productResponse.data?.product?.variants?.edges?.length > 0) {
+            // Update the first (default) variant
+            const firstVariantId = productResponse.data.product.variants.edges[0].node.id.split('/').pop();
+            const firstVariant = productData.variants[0];
+            const firstSizeName = productData.options && productData.options.length > 0 ? 
+              productData.options[0].values[0] : 
+              'Small';
+            
+            // console.log(`📦 Updating first variant for size: ${firstSizeName}`);
+            
+            const updateUrl = `https://${shop}/admin/api/2025-01/variants/${firstVariantId}.json`;
+            // Use actual inventoryQuantity from productData, with fallback to 0
+            const firstVariantQuantity = firstVariant.inventoryQuantity !== null && firstVariant.inventoryQuantity !== undefined
+              ? Math.max(0, parseInt(firstVariant.inventoryQuantity) || 0)
+              : 0;
+            const updateData = {
+              variant: {
+                id: firstVariantId,
+                price: firstVariant.price || '500.00',
+                sku: firstVariant.sku || '',
+                inventory_quantity: firstVariantQuantity,
+                inventory_management: "shopify",
+                inventory_policy: "continue",
+                option1: firstSizeName
               }
-            }
-          `;
-
-          // ProductVariantsBulkInput structure (2025-10 API):
-          // - price: String (required)
-          // - inventoryPolicy: InventoryPolicy (optional)
-          // - optionValues: [ProductOptionValueInput!] (required for products with options)
-          // - inventoryQuantities: [InventoryItemQuantityInput!] (optional)
-          // - barcode: String (optional)
-          // - weight: Float (optional)
-          // - compareAtPrice: String (optional)
-          // NOTE: SKU is NOT supported in ProductVariantsBulkInput - must be set separately
-          
-          // ProductVariantsBulkInput: optionValues is array of VariantOptionValueInput
-          // VariantOptionValueInput has 'name' (option value) and 'optionName' (option name)
-          // Official Shopify docs: https://shopify.dev/docs/api/admin-graphql/latest/mutations/productVariantsBulkCreate
-          // Create ALL variants since we deleted the default one
-          const variantsForBulkCreate = productVariants.map((variantData) => {
-            const optionValueName = variantData.optionValues[0]?.name;
-            
-            return {
-              price: variantData.price.toString(),
-              inventoryPolicy: variantData.inventoryPolicy || 'CONTINUE',
-              optionValues: [
-                {
-                  name: optionValueName,        // Option value: "Small", "Medium", etc.
-                  optionName: sizeOption.name   // Option name: "Size"
-                }
-              ]
             };
-          });
 
-          console.log('📦 Creating variants with bulk create:', JSON.stringify(variantsForBulkCreate, null, 2));
+            // console.log(`📦 Updating first variant with data:`, JSON.stringify(updateData, null, 2));
 
-          const variantsResponse = await client.request(variantsBulkCreateMutation, {
-            variables: {
-              productId: productId,
-              variants: variantsForBulkCreate
-            }
-          });
+            const updateResponse = await fetch(updateUrl, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Shopify-Access-Token': accessToken
+              },
+              body: JSON.stringify(updateData)
+            });
 
-          if (variantsResponse.errors) {
-            throw new Error(`Variants creation GraphQL errors: ${JSON.stringify(variantsResponse.errors)}`);
-          }
-
-          const variantsResult = variantsResponse.data.productVariantsBulkCreate;
-
-          if (variantsResult.userErrors.length > 0) {
-            throw new Error(`Variants creation errors: ${JSON.stringify(variantsResult.userErrors)}`);
-          }
-
-          console.log('✅ Created', variantsResult.productVariants.length, 'variants');
-
-          // Step 4b: Update SKUs for all variants using productVariantsBulkUpdate (API 2025-10)
-          if (variantsResult.productVariants.length > 0) {
-            console.log('🏷️ Setting SKUs for all variants using bulk update...');
+            const updateResult = await updateResponse.json();
+            // console.log(`✅ First variant update response:`, JSON.stringify(updateResult, null, 2));
             
-            // Prepare all variants with SKUs for bulk update
-            const variantsWithSkus = variantsResult.productVariants
-              .map((createdVariant, i) => {
-                const originalVariant = productVariants[i];
-                if (originalVariant && originalVariant.sku) {
-                  return {
-                    id: createdVariant.id,
-                    sku: originalVariant.sku
-                  };
-                }
-                return null;
-              })
-              .filter(v => v !== null);
-            
-            if (variantsWithSkus.length > 0) {
+            if (updateResult.variant) {
+              // console.log(`✅ First variant (${firstSizeName}) updated successfully with price: ${firstVariant.price}`);
+              
+              // Get location IDs and set inventory for both Canada and India locations
               try {
-                const bulkUpdateMutation = `
-                  mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-                      productVariants {
-                        id
-                        sku
-                      }
-                      userErrors {
-                        field
-                        message
-                      }
-                    }
-                  }
-                `;
-
-                const bulkUpdateResponse = await client.request(bulkUpdateMutation, {
-                  variables: {
-                    productId: productId,
-                    variants: variantsWithSkus
+                const locationsUrl = `https://${shop}/admin/api/2025-01/locations.json`;
+                const locationsResponse = await fetch(locationsUrl, {
+                  headers: {
+                    'X-Shopify-Access-Token': accessToken
                   }
                 });
+                const locationsResult = await locationsResponse.json();
+                // console.log('📍 Available locations:', JSON.stringify(locationsResult, null, 2));
+                
+                if (locationsResult.locations && locationsResult.locations.length > 0) {
+                  // Filter locations for Canada and India (support multiple possible fields from API)
+                  const canadaLocations = locationsResult.locations.filter(loc => 
+                    loc.country === 'Canada' || loc.country_code === 'CA' || loc.country_name === 'Canada'
+                  );
+                  const indiaLocations = locationsResult.locations.filter(loc => 
+                    loc.country === 'India' || loc.country_code === 'IN' || loc.country_name === 'India'
+                  );
+                  
+                  // Use all available locations if no specific country locations found
+                  const targetLocations = canadaLocations.length > 0 || indiaLocations.length > 0 
+                    ? [...canadaLocations, ...indiaLocations]
+                    : locationsResult.locations;
+                  
+                  // console.log(`📍 Target locations for inventory (Canada: ${canadaLocations.length}, India: ${indiaLocations.length}):`, 
+                  //   targetLocations.map(loc => `${loc.name} (${loc.country_code})`));
+                  
+                  // Connect and set inventory for each target location
+                  for (const location of targetLocations) {
+                    // Ensure the inventory item is connected to the location before setting available
+                    try {
+                      const connectUrl = `https://${shop}/admin/api/2025-01/inventory_levels/connect.json`;
+                      const connectData = {
+                        location_id: location.id,
+                        inventory_item_id: updateResult.variant.inventory_item_id
+                      };
 
-                if (bulkUpdateResponse.data?.productVariantsBulkUpdate?.userErrors?.length > 0) {
-                  console.warn(`⚠️ Failed to update SKUs:`, bulkUpdateResponse.data.productVariantsBulkUpdate.userErrors);
+                      // console.log(`🔗 Connecting inventory item to location ${location.name} (${location.country || location.country_code})`);
+                      const connectResponse = await fetch(connectUrl, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-Shopify-Access-Token': accessToken
+                        },
+                        body: JSON.stringify(connectData)
+                      });
+                      const connectResult = await connectResponse.json();
+                      if (connectResponse.status >= 400) {
+                        console.warn(`⚠️ Connect failed for location ${location.id}:`, JSON.stringify(connectResult));
+                      }
+                    } catch (connectError) {
+                      console.warn(`⚠️ Error connecting inventory to location ${location.id}:`, connectError.message);
+                    }
+                    const inventoryUrl = `https://${shop}/admin/api/2025-01/inventory_levels/set.json`;
+                    // Use actual quantity from first variant
+                    const inventoryData = {
+                      location_id: location.id,
+                      inventory_item_id: updateResult.variant.inventory_item_id,
+                      available: firstVariantQuantity
+                    };
+                    
+                    // console.log(`📦 Setting inventory at ${location.name} (${location.country || location.country_code}):`, JSON.stringify(inventoryData, null, 2));
+                    
+                    const inventoryResponse = await fetch(inventoryUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'X-Shopify-Access-Token': accessToken
+                      },
+                      body: JSON.stringify(inventoryData)
+                    });
+                    
+                    const inventoryResult = await inventoryResponse.json();
+                    // console.log(`✅ Inventory set response at ${location.name}:`, JSON.stringify(inventoryResult, null, 2));
+                  }
                 } else {
-                  console.log(`✅ Set SKUs for ${variantsWithSkus.length} variants`);
-                  // Update the createdVariant objects with the SKUs
-                  bulkUpdateResponse.data.productVariantsBulkUpdate.productVariants.forEach((updatedVariant, i) => {
-                    const matchingVariant = variantsResult.productVariants.find(v => v.id === updatedVariant.id);
-                    if (matchingVariant) {
-                      matchingVariant.sku = updatedVariant.sku;
+                  // console.warn('⚠️ No locations found');
+                }
+              } catch (inventoryError) {
+                console.error('❌ Error setting inventory:', inventoryError.message);
+              }
+            } else {
+              console.warn(`First variant update failed:`, updateResult);
+            }
+
+            // Now create additional variants for remaining sizes
+            for (let i = 1; i < productData.variants.length; i++) {
+              const variant = productData.variants[i];
+              const sizeName = productData.options && productData.options.length > 0 ? 
+                productData.options[0].values[i] : 
+                `Size ${i + 1}`;
+              
+              // console.log(`📦 Creating variant ${i + 1} for size: ${sizeName}`);
+              
+              // Create variant using REST API
+              // Use actual inventoryQuantity from variant data, with fallback to 0
+              const variantQuantity = variant.inventoryQuantity !== null && variant.inventoryQuantity !== undefined
+                ? Math.max(0, parseInt(variant.inventoryQuantity) || 0)
+                : 0;
+              const createUrl = `https://${shop}/admin/api/2025-01/products/${productId.split('/').pop()}/variants.json`;
+              const variantData = {
+                variant: {
+                  price: variant.price || '500.00',
+                  sku: variant.sku || '',
+                  inventory_quantity: variantQuantity,
+                  inventory_management: "shopify",
+                  inventory_policy: "continue",
+                  option1: sizeName
+                }
+              };
+
+              // console.log(`📦 Creating variant ${i + 1} with data:`, JSON.stringify(variantData, null, 2));
+
+              const createResponse = await fetch(createUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Shopify-Access-Token': accessToken
+                },
+                body: JSON.stringify(variantData)
+              });
+
+              const createResult = await createResponse.json();
+              // console.log(`✅ Variant ${i + 1} creation response:`, JSON.stringify(createResult, null, 2));
+              
+              if (createResult.variant) {
+                // console.log(`✅ Variant ${i + 1} (${sizeName}) created successfully with price: ${variant.price}`);
+                
+                // Get location IDs and set inventory for both Canada and India locations
+                try {
+                  const locationsUrl = `https://${shop}/admin/api/2025-01/locations.json`;
+                  const locationsResponse = await fetch(locationsUrl, {
+                    headers: {
+                      'X-Shopify-Access-Token': accessToken
                     }
                   });
-                }
-              } catch (updateError) {
-                console.warn(`⚠️ Failed to bulk update SKUs:`, updateError.message);
-              }
-            }
-          }
+                  const locationsResult = await locationsResponse.json();
+                  
+                  if (locationsResult.locations && locationsResult.locations.length > 0) {
+                    console.log(`📍 Available locations:`, JSON.stringify(locationsResult.locations, null, 2));
+                    
+                    // Filter locations for Canada and India (support multiple possible fields from API)
+                    const canadaLocations = locationsResult.locations.filter(loc => 
+                      loc.country === 'Canada' || loc.country_code === 'CA' || loc.country_name === 'Canada'
+                    );
+                    const indiaLocations = locationsResult.locations.filter(loc => 
+                      loc.country === 'India' || loc.country_code === 'IN' || loc.country_name === 'India'
+                    );
+                    
+                    // Use all available locations if no specific country locations found
+                    const targetLocations = canadaLocations.length > 0 || indiaLocations.length > 0 
+                      ? [...canadaLocations, ...indiaLocations]
+                      : locationsResult.locations;
+                    
+                    console.log(`📍 Target locations for inventory (Canada: ${canadaLocations.length}, India: ${indiaLocations.length}):`, 
+                      targetLocations.map(loc => `${loc.name} (${loc.country_code})`));
+                    
+                    // Connect and set inventory for each target location
+                    for (const location of targetLocations) {
+                      // Ensure the inventory item is connected to the location before setting available
+                      try {
+                        const connectUrl = `https://${shop}/admin/api/2025-01/inventory_levels/connect.json`;
+                        const connectData = {
+                          location_id: location.id,
+                          inventory_item_id: createResult.variant.inventory_item_id
+                        };
 
-          // Update the product object with all created variants for inventory setting
-          product.variants.edges = variantsResult.productVariants.map(variant => ({
-            node: {
-              id: variant.id,
-              title: variant.title,
-              price: variant.price,
-              sku: variant.sku,
-              inventoryItem: {
-                id: variant.inventoryItem?.id || null
-              }
-            }
-          }));
-
-        } catch (variantError) {
-          console.error('❌ Failed to create variants:', variantError.message);
-          throw variantError;
-        }
-      }
-
-      // Step 5: Set inventory quantities for all variants using GraphQL
-      if (productVariants.length > 0 && product.variants.edges.length > 0) {
-        try {
-          console.log('📦 Setting inventory quantities using GraphQL...');
-          console.log(`📊 productVariants array has ${productVariants.length} items`);
-          console.log(`📊 product.variants.edges array has ${product.variants.edges.length} items`);
-          
-          // Debug: Show what's in productVariants
-          productVariants.forEach((v, i) => {
-            console.log(`  - productVariants[${i}]: quantity=${v.inventoryQuantities?.availableQuantity}, price=${v.price}, sku=${v.sku}`);
-          });
-
-          // Get location IDs
-          const locationsQuery = `
-            query {
-              locations(first: 10) {
-                edges {
-                  node {
-                    id
-                    name
-                    address {
-                      country
-                      countryCode
+                        console.log(`🔗 Connecting inventory item to location ${location.name} (${location.country || location.country_code})`);
+                        const connectResponse = await fetch(connectUrl, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'X-Shopify-Access-Token': accessToken
+                          },
+                          body: JSON.stringify(connectData)
+                        });
+                        const connectResult = await connectResponse.json();
+                        if (connectResponse.status >= 400) {
+                          console.warn(`⚠️ Connect failed for location ${location.id}:`, JSON.stringify(connectResult));
+                        }
+                      } catch (connectError) {
+                        console.warn(`⚠️ Error connecting inventory to location ${location.id}:`, connectError.message);
+                      }
+                    const inventoryUrl = `https://${shop}/admin/api/2025-01/inventory_levels/set.json`;
+                    // Use actual quantity from variant
+                    const inventoryData = {
+                      location_id: location.id,
+                      inventory_item_id: createResult.variant.inventory_item_id,
+                      available: variantQuantity
+                    };
+                      
+                      console.log(`📦 Setting inventory for variant ${i + 1} at ${location.name} (${location.country || location.country_code}):`, JSON.stringify(inventoryData, null, 2));
+                      
+                      const inventoryResponse = await fetch(inventoryUrl, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-Shopify-Access-Token': accessToken
+                        },
+                        body: JSON.stringify(inventoryData)
+                      });
+                      
+                      const inventoryResult = await inventoryResponse.json();
+                      console.log(`✅ Inventory set response for variant ${i + 1} at ${location.name}:`, JSON.stringify(inventoryResult, null, 2));
                     }
+                  } else {
+                    console.warn(`⚠️ No locations found for variant ${i + 1}`);
                   }
+                } catch (inventoryError) {
+                  console.error(`❌ Error setting inventory for variant ${i + 1}:`, inventoryError.message);
                 }
+              } else {
+                console.warn(`Variant ${i + 1} creation failed:`, createResult);
               }
             }
-          `;
-
-          const locationsResponse = await client.request(locationsQuery);
-          const locations = locationsResponse.data.locations.edges.map(e => e.node);
-          
-          console.log('📍 Available locations:', locations.map(l => `${l.name} (${l.address.countryCode})`));
-
-          // Filter for Canada and India
-          const targetLocations = locations.filter(loc => 
-            loc.address.countryCode === 'CA' || loc.address.countryCode === 'IN'
-          );
-
-          if (targetLocations.length === 0 && locations.length > 0) {
-            console.warn('⚠️ No Canada/India locations found, using first available location');
-            targetLocations.push(locations[0]);
           }
-
-          console.log('📍 Target locations:', targetLocations.map(l => `${l.name} (${l.address.countryCode})`));
-
-          // Set inventory for each variant at each location
-          for (const location of targetLocations) {
-            const inventorySetMutation = `
-              mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-                inventorySetQuantities(input: $input) {
-                  inventoryAdjustmentGroup {
-                    createdAt
-                    reason
-                  }
-                  userErrors {
-                    field
-                    message
-                  }
-                }
-              }
-            `;
-
-            const quantities = product.variants.edges.map((edge, index) => {
-              const originalVariant = productVariants[index];
-              
-              // Get quantity from nested structure or direct field
-              let quantity = 0;
-              if (originalVariant?.inventoryQuantities?.availableQuantity !== undefined) {
-                quantity = originalVariant.inventoryQuantities.availableQuantity;
-              } else if (originalVariant?.inventoryQuantity !== undefined) {
-                quantity = originalVariant.inventoryQuantity;
-              }
-              
-              console.log(`📊 Variant ${index}: SKU=${edge.node.sku}, Inventory=${quantity}, InventoryItemId=${edge.node.inventoryItem.id}`);
-              
-              return {
-                inventoryItemId: edge.node.inventoryItem.id,
-                locationId: location.id,
-                quantity: quantity
-              };
-            });
-
-            console.log(`📦 Setting inventory at ${location.name} for ${quantities.length} variants`);
-
-            const inventoryResponse = await client.request(inventorySetMutation, {
-              variables: {
-                input: {
-                  name: 'available',  // Required field: 'available' is the standard inventory name
-                  reason: 'correction',
-                  quantities: quantities
-                }
-              }
-            });
-
-            if (inventoryResponse.data.inventorySetQuantities.userErrors.length > 0) {
-              console.warn('⚠️ Inventory set errors:', inventoryResponse.data.inventorySetQuantities.userErrors);
-            } else {
-              console.log(`✅ Inventory set successfully at ${location.name}`);
-            }
-          }
-        } catch (inventoryError) {
-          console.error('❌ Error setting inventory:', inventoryError.message);
+        } catch (variantError) {
+          console.error('❌ Error creating variants:', variantError.message);
+          console.error('Variant error details:', variantError);
         }
       }
 
-      // Step 4: Add images using GraphQL
+      // Step 4: Add images if provided (using productCreateMedia)
       if (productData.images && productData.images.length > 0) {
         for (const image of productData.images) {
           try {
-            console.log('🖼️ Adding image:', image.src);
+            console.log('🖼️ Attempting to add image:', image.src);
             
             const imageMutation = `
               mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
@@ -729,22 +648,25 @@ class ModernShopifyService {
               }
             });
             
+            console.log('✅ Product image response:', JSON.stringify(imageResponse, null, 2));
+            
             if (imageResponse.data.productCreateMedia.mediaUserErrors.length > 0) {
-              console.warn('Image errors:', imageResponse.data.productCreateMedia.mediaUserErrors);
+              console.warn('Image user errors:', imageResponse.data.productCreateMedia.mediaUserErrors);
             } else {
-              console.log('✅ Image added successfully');
+              console.log('✅ Product image added successfully:', image.src);
             }
           } catch (imageError) {
             console.error('❌ Error adding image:', imageError.message);
+            console.error('Image error details:', imageError);
           }
         }
       }
 
-      // Step 5: Add metafields using GraphQL
+      // Step 5: Add metafields if provided
       if (productData.metafields && productData.metafields.length > 0) {
         for (const metafield of productData.metafields) {
           try {
-            console.log('🏷️ Adding metafield:', metafield.key);
+            console.log('🏷️ Attempting to add metafield:', JSON.stringify(metafield, null, 2));
             
             const metafieldMutation = `
               mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
@@ -755,17 +677,17 @@ class ModernShopifyService {
                     key
                     value
                     type
-                  }
-                  userErrors {
-                    field
-                    message
-                  }
+                }
+                userErrors {
+                  field
+                  message
                 }
               }
-            `;
+            }
+          `;
 
             const metafieldResponse = await client.request(metafieldMutation, {
-              variables: {
+            variables: {
                 metafields: [{
                   ownerId: productId,
                   namespace: metafield.namespace,
@@ -776,24 +698,28 @@ class ModernShopifyService {
               }
             });
             
+            console.log('✅ Product metafield response:', JSON.stringify(metafieldResponse, null, 2));
+            
             if (metafieldResponse.data.metafieldsSet.userErrors.length > 0) {
-              console.warn('Metafield errors:', metafieldResponse.data.metafieldsSet.userErrors);
-            } else {
-              console.log('✅ Metafield added successfully');
+              console.warn('Metafield user errors:', metafieldResponse.data.metafieldsSet.userErrors);
+          } else {
+              console.log('✅ Product metafield added successfully:', metafield.key);
             }
           } catch (metafieldError) {
             console.error('❌ Error adding metafield:', metafieldError.message);
+            console.error('Metafield error details:', metafieldError);
           }
         }
       }
 
-      // Step 6: Publish product to Online Store using GraphQL
+      // Step 6: Publish product to Online Store automatically using GraphQL API
+      // This MUST happen AFTER all product setup (variants, options, images, metafields) is complete
       try {
-        console.log('📢 Publishing product to Online Store...');
+        console.log('📢 Starting publication process for product:', productId);
         
-        // Get Online Store publication ID
+        // First, get the Online Store publication ID dynamically
         const getPublicationsQuery = `
-          query {
+          query GetPublications {
             publications(first: 10) {
               edges {
                 node {
@@ -805,15 +731,37 @@ class ModernShopifyService {
           }
         `;
 
+        console.log('📋 Fetching publications to find Online Store...');
         const publicationsResponse = await client.request(getPublicationsQuery);
-        const onlineStorePub = publicationsResponse.data.publications.edges.find(
-          edge => edge.node.name === 'Online Store'
-        );
+        console.log('📋 Publications response:', JSON.stringify(publicationsResponse, null, 2));
+        
+        let onlineStorePublicationId = null;
+        if (publicationsResponse.data?.publications?.edges) {
+          const onlineStorePub = publicationsResponse.data.publications.edges.find(
+            edge => edge.node.name === 'Online Store'
+          );
+          if (onlineStorePub) {
+            onlineStorePublicationId = onlineStorePub.node.id;
+            console.log('✅ Found Online Store publication ID:', onlineStorePublicationId);
+          } else {
+            console.warn('⚠️ Online Store publication not found. Available publications:');
+            publicationsResponse.data.publications.edges.forEach(edge => {
+              console.log(`  - ${edge.node.name}: ${edge.node.id}`);
+            });
+            // Try to use the first publication if Online Store is not found by name
+            if (publicationsResponse.data.publications.edges.length > 0) {
+              onlineStorePublicationId = publicationsResponse.data.publications.edges[0].node.id;
+              console.log('⚠️ Using first available publication as fallback:', onlineStorePublicationId);
+            }
+          }
+        }
 
-        if (!onlineStorePub) {
+        if (!onlineStorePublicationId) {
+          console.error('❌ Online Store publication ID not found. Cannot publish product.');
           throw new Error('Online Store publication not found');
         }
 
+        // Publish the product to Online Store using GraphQL mutation
         const publishMutation = `
           mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
             publishablePublish(id: $id, input: $input) {
@@ -832,24 +780,63 @@ class ModernShopifyService {
           }
         `;
 
+        const publishInput = [{
+          publicationId: onlineStorePublicationId
+        }];
+
+        console.log('📢 Publishing product to Online Store...');
+        console.log('📢 Product ID:', productId);
+        console.log('📢 Publication ID:', onlineStorePublicationId);
+        console.log('📢 Publish variables:', JSON.stringify({ id: productId, input: publishInput }, null, 2));
+        
         const publishResponse = await client.request(publishMutation, { 
           variables: { 
             id: productId, 
-            input: [{ publicationId: onlineStorePub.node.id }]
+            input: publishInput 
           } 
         });
         
-        if (publishResponse.data.publishablePublish.userErrors.length > 0) {
-          console.warn('Publish errors:', publishResponse.data.publishablePublish.userErrors);
+        console.log('📢 Publish response:', JSON.stringify(publishResponse, null, 2));
+        
+        if (publishResponse.errors) {
+          console.error('❌ GraphQL errors in publish response:', JSON.stringify(publishResponse.errors, null, 2));
+          throw new Error(`GraphQL errors: ${JSON.stringify(publishResponse.errors)}`);
+        }
+
+        if (publishResponse.data?.publishablePublish?.userErrors?.length > 0) {
+          const errors = publishResponse.data.publishablePublish.userErrors;
+          console.error('❌ Publish userErrors:', JSON.stringify(errors, null, 2));
+          throw new Error(`Publish errors: ${JSON.stringify(errors)}`);
+        }
+
+        // Check if publishing was successful
+        // The response should have publishablePublish with either publishable or no errors
+        if (publishResponse.data?.publishablePublish) {
+          if (publishResponse.data.publishablePublish.publishable) {
+            console.log('✅ Product published successfully to Online Store');
+            console.log('✅ Published product details:', JSON.stringify(publishResponse.data.publishablePublish.publishable, null, 2));
+          } else {
+            // If there's no publishable but also no errors, it might still be successful
+            // Some Shopify API versions return success without the publishable object
+            console.log('✅ Product publish request completed (no errors detected)');
+            console.log('📢 Full publish response:', JSON.stringify(publishResponse.data.publishablePublish, null, 2));
+          }
         } else {
-          console.log('✅ Product published to Online Store');
+          console.warn('⚠️ Publish response did not return expected data structure');
+          console.warn('⚠️ Full response:', JSON.stringify(publishResponse, null, 2));
+          throw new Error('Publish response did not return expected data structure');
         }
       } catch (publishError) {
-        console.error('❌ Error publishing product:', publishError.message);
+        console.error('❌ Error publishing product to Online Store:', publishError.message);
+        console.error('Publish error details:', publishError);
+        console.error('❌ Product was created but NOT published to Online Store. Manual publishing may be required.');
+        // Don't throw - allow product creation to succeed even if publishing fails
+        // The product can be manually published later if needed
+        // But log it clearly so we know publishing failed
       }
 
       // Step 7: Get final product with all details
-      const getProductQuery = `
+      const getProductMutation = `
         query getProduct($id: ID!) {
           product(id: $id) {
             id
@@ -859,7 +846,7 @@ class ModernShopifyService {
             productType
             vendor
             tags
-            descriptionHtml
+            description
             images(first: 10) {
               edges {
                 node {
@@ -869,11 +856,10 @@ class ModernShopifyService {
                 }
               }
             }
-            variants(first: 50) {
+            variants(first: 10) {
               edges {
                 node {
                   id
-                  title
                   price
                   sku
                   inventoryQuantity
@@ -900,19 +886,17 @@ class ModernShopifyService {
         }
       `;
 
-      const finalResponse = await client.request(getProductQuery, {
+      const finalResponse = await client.request(getProductMutation, {
         variables: { id: productId }
       });
-
-      console.log('✅ Product creation completed successfully (100% GraphQL)');
 
       return {
         success: true,
         product: this.formatProductWithDetails(finalResponse.data.product),
-        message: 'Product created successfully using GraphQL API (2025-10)'
+        message: 'Product created successfully'
       };
     } catch (error) {
-      console.error('❌ Error in GraphQL product creation:', error);
+      console.error('Error creating product:', error);
       return {
         success: false,
         error: error.message

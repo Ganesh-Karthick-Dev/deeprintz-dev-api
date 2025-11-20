@@ -8,10 +8,10 @@
  */
 
 const axios = require('axios');
+const SHOPIFY_CONFIG = require('./config/shopify');
 
 // Configuration
 const CONFIG = {
-  NGROK_URL: 'https://df5b0a4dbe35.ngrok-free.app',
   SHOP_DOMAIN: 'mayu-12351.myshopify.com'
 };
 
@@ -90,7 +90,7 @@ async function testOrderFlow() {
   // Test 1: Webhook endpoint accessibility
   console.log('📡 Test 1: Webhook Endpoint');
   try {
-    const webhookUrl = `${CONFIG.NGROK_URL}/api/deeprintz/live/shopify/webhooks/orders`;
+    const webhookUrl = SHOPIFY_CONFIG.WEBHOOK_URL_ORDERS;
     console.log(`   Testing: ${webhookUrl}`);
 
     const webhookResponse = await axios.post(webhookUrl, mockShopifyOrder, {

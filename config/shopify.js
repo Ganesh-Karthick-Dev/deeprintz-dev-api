@@ -1,10 +1,22 @@
 // Shopify Configuration
 const SHOPIFY_CONFIG = {
-  // Your ngrok URL - UPDATE THIS WHEN YOUR NGROK URL CHANGES
-  NGROK_URL: 'https://df5b0a4dbe35.ngrok-free.app',
+  // Your ngrok URL - UPDATE THIS WHEN YOUR NGROK URL CHANGES (for dev testing)
+  NGROK_URL: 'https://1b6a724f3299.ngrok-free.app',
+  
+  // Production API URL (your live backend)
+  PRODUCTION_API_URL: process.env.PRODUCTION_API_URL || 'https://api.deeprintz.com', // Update with your actual production API URL
   
   // Environment (dev/live)
   ENVIRONMENT: 'dev', // Change to 'live' for production
+  
+  // Frontend URL (for redirects after OAuth) - DYNAMIC based on environment
+  get FRONTEND_URL() {
+    if (this.ENVIRONMENT === 'live') {
+      return process.env.FRONTEND_URL || 'https://deeprintz.com'; // Your production website
+    } else {
+      return process.env.FRONTEND_URL || 'http://localhost:5173'; // Dev frontend
+    }
+  },
   
   // API Credentials
   CLIENT_ID: '8012fe790c9580e7da274db5dfb8111d',
@@ -38,9 +50,13 @@ const SHOPIFY_CONFIG = {
     'write_publications'
   ],
   
-  // URLs
+  // URLs - DYNAMIC based on environment
   get BASE_URL() {
-    return this.NGROK_URL;
+    if (this.ENVIRONMENT === 'live') {
+      return this.PRODUCTION_API_URL; // Use production API URL in live mode
+    } else {
+      return this.NGROK_URL; // Use ngrok URL in dev mode
+    }
   },
   
   get API_BASE() {
@@ -52,7 +68,8 @@ const SHOPIFY_CONFIG = {
   },
   
   get SUCCESS_REDIRECT_URL() {
-    return `${this.BASE_URL}/shopify/success`;
+    // Redirect to frontend StoreConnect page after successful OAuth
+    return `${this.FRONTEND_URL}/user/storeconnect`;
   },
   
   // CarrierService URL (for shipping rates)

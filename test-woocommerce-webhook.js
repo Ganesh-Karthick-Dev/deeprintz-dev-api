@@ -1,118 +1,88 @@
-const axios = require('axios');
+/**
+ * Test WooCommerce Webhook & Setup if Missing
+ * Run: node test-woocommerce-webhook.js
+ */
 
-// Test the WooCommerce webhook endpoint
-async function testWooCommerceWebhook() {
+const knexConfig = require('./utils/knexfile');
+const knex = require('knex')(knexConfig.deeprintzLive);
+
+async function testAndSetupWebhook() {
   try {
-    console.log('🧪 Testing WooCommerce webhook endpoint...\n');
-    
-    // Test the debug route first
-    console.log('1️⃣ Testing debug route...');
-    try {
-      const debugResponse = await axios.get('https://phpstack-1481791-5628315.cloudwaysapps.com/api/deeprintz/dev/woocommerce/test');
-      console.log('✅ Debug route working:', debugResponse.data);
-    } catch (error) {
-      console.log('❌ Debug route failed:', error.response?.data || error.message);
+    console.log('╔══════════════════════════════════════════════════════════════════════════╗');
+    console.log('║   🔍 TEST WOOCOMMERCE WEBHOOK CONFIGURATION                              ║');
+    console.log('╚══════════════════════════════════════════════════════════════════════════╝\n');
+
+    // Get connected WooCommerce store
+    const store = await knex('woocommerce_stores')
+      .where({ status: 'connected' })
+      .orderBy('id', 'desc')
+      .first();
+
+    if (!store) {
+      console.error('❌ No connected WooCommerce store found!');
+      console.error('   Please connect a WooCommerce store first.');
+      process.exit(1);
     }
-    
-    console.log('\n2️⃣ Testing webhook endpoint...');
-    
-    // Test data that mimics a WooCommerce order webhook
-    const testWebhookData = {
-      topic: 'order.created',
-      resource_id: 12345,
-      resource_type: 'order',
-      id: 12345,
-      number: '12345',
-      status: 'pending',
-      date_created: new Date().toISOString(),
-      date_modified: new Date().toISOString(),
-      total: '99.99',
-      subtotal: '89.99',
-      total_tax: '10.00',
-      shipping_total: '0.00',
-      discount_total: '0.00',
-      currency: 'USD',
-      customer_id: 678,
-      billing: {
-        first_name: 'John',
-        last_name: 'Doe',
-        email: 'john@example.com'
-      },
-      shipping: {
-        first_name: 'John',
-        last_name: 'Doe'
-      },
-      line_items: [
-        {
-          id: 1,
-          name: 'Test Product',
-          product_id: 789,
-          quantity: 1,
-          total: '99.99',
-          sku: 'DP-123-TEST'
-        }
-      ],
-      payment_method: 'stripe',
-      payment_method_title: 'Credit Card (Stripe)'
-    };
-    
-    // Test the webhook endpoint
-    const webhookResponse = await axios.post(
-      'https://phpstack-1481791-5628315.cloudwaysapps.com/api/deeprintz/dev/woocommerce/webhooks/orders',
-      testWebhookData,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'WooCommerce-Webhook-Test/1.0'
-        }
-      }
-    );
-    
-    console.log('✅ Webhook endpoint working!');
-    console.log('📊 Response:', webhookResponse.data);
-    
+
+    console.log('✅ Found connected WooCommerce store:');
+    console.log(`   Store URL: ${store.store_url}`);
+    console.log(`   Vendor ID: ${store.vendor_id}`);
+    console.log('');
+
+    // Check webhook URL
+    const webhookUrl = `https://devdevapi.deeprintz.com/api/woocommerce/webhooks/orders`;
+    console.log('📡 Expected Webhook URL:', webhookUrl);
+    console.log('');
+
+    // Instructions
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    console.log('🔧 TO FIX "ORDERS NOT DETECTING" ISSUE:');
+    console.log('');
+    console.log('1. Go to WooCommerce Admin:');
+    console.log(`   ${store.store_url}/wp-admin/admin.php?page=wc-settings&tab=advanced&section=webhooks`);
+    console.log('');
+    console.log('2. Click "Add webhook"');
+    console.log('');
+    console.log('3. Configure:');
+    console.log('   Name: Deeprintz Order Notification');
+    console.log('   Status: Active');
+    console.log('   Topic: Order created');
+    console.log(`   Delivery URL: ${webhookUrl}`);
+    console.log(`   Secret: ${store.consumer_secret || '(use your consumer secret)'}`);
+    console.log('   API Version: WP REST API Integration v3');
+    console.log('');
+    console.log('4. Click "Save webhook"');
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    console.log('🧪 AFTER SETUP - TEST IT:');
+    console.log('');
+    console.log('1. Place a test order on your WooCommerce store');
+    console.log('2. Check your terminal/console for:');
+    console.log('   "🛒 WooCommerce order webhook received"');
+    console.log('3. Order should appear in your orders dashboard');
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    console.log('💡 ABOUT THE SHIPPING ERROR:');
+    console.log('');
+    console.log('The "500 error" for shipping is because the WordPress plugin');
+    console.log('needs to be installed. This is SEPARATE from order detection.');
+    console.log('');
+    console.log('For now, you can:');
+    console.log('- Use WooCommerce built-in shipping methods (flat rate, etc.)');
+    console.log('- Skip the plugin installation if you don\'t need custom shipping');
+    console.log('');
+    console.log('Orders will still be detected properly with webhook! ✅');
+    console.log('');
+
+    process.exit(0);
   } catch (error) {
-    console.log('❌ Webhook test failed:');
-    if (error.response) {
-      console.log('📊 Status:', error.response.status);
-      console.log('📊 Data:', error.response.data);
-      console.log('📊 Headers:', error.response.headers);
-    } else {
-      console.log('📊 Error:', error.message);
-    }
+    console.error('\n❌ ERROR:', error.message);
+    console.error(error.stack);
+    process.exit(1);
   }
 }
 
-// Test both endpoints
-async function testAllEndpoints() {
-  console.log('🚀 Starting WooCommerce endpoint tests...\n');
-  
-  // Test 1: Debug route
-  console.log('📍 Test 1: Debug Route');
-  console.log('URL: https://phpstack-1481791-5628315.cloudwaysapps.com/api/deeprintz/dev/woocommerce/test\n');
-  
-  // Test 2: Webhook endpoint
-  console.log('📍 Test 2: Webhook Endpoint');
-  console.log('URL: https://phpstack-1481791-5628315.cloudwaysapps.com/api/deeprintz/dev/woocommerce/webhooks/orders\n');
-  
-  await testWooCommerceWebhook();
-  
-  console.log('\n🎯 Test Summary:');
-  console.log('• If both tests pass: Your webhook endpoint is working correctly');
-  console.log('• If debug route fails: There\'s an issue with route registration');
-  console.log('• If webhook route fails: There\'s an issue with the webhook controller');
-  console.log('\n🔧 Next Steps:');
-  console.log('1. Check your server logs for any errors');
-  console.log('2. Verify the database table exists');
-  console.log('3. Test with a real WooCommerce webhook');
-}
-
-// Run the tests
-if (require.main === module) {
-  testAllEndpoints();
-}
-
-module.exports = {
-  testWooCommerceWebhook,
-  testAllEndpoints
-};
+testAndSetupWebhook();

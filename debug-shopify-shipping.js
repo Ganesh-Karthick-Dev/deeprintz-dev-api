@@ -8,10 +8,10 @@
  */
 
 const axios = require('axios');
+const SHOPIFY_CONFIG = require('./config/shopify');
 
 // Configuration
 const CONFIG = {
-  NGROK_URL: 'https://df5b0a4dbe35.ngrok-free.app',
   SHOP_DOMAIN: 'mayu-12351.myshopify.com',
   USER_ID: '2004' // From your console output
 };
@@ -21,14 +21,14 @@ async function debugShippingIssue() {
   console.log('='.repeat(50));
 
   console.log(`🏪 Shop Domain: ${CONFIG.SHOP_DOMAIN}`);
-  console.log(`📡 Ngrok URL: ${CONFIG.NGROK_URL}`);
+  console.log(`📡 Ngrok URL: ${SHOPIFY_CONFIG.NGROK_URL}`);
   console.log(`👤 User ID: ${CONFIG.USER_ID}`);
   console.log('');
 
   // Test 1: Check if ngrok endpoint is accessible
   console.log('📡 Test 1: Ngrok Endpoint Accessibility');
   try {
-    const testResponse = await axios.get(`${CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates/test`);
+    const testResponse = await axios.get(`${SHOPIFY_CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates/test`);
     console.log('✅ Ngrok endpoint accessible');
     console.log(`   Callback URL: ${testResponse.data.callbackUrl}`);
   } catch (error) {
@@ -40,7 +40,7 @@ async function debugShippingIssue() {
   // Test 2: Test shipping rates calculation
   console.log('\n🚚 Test 2: Shipping Rates Calculation');
   try {
-    const ratesResponse = await axios.post(`${CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates`, {
+    const ratesResponse = await axios.post(`${SHOPIFY_CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates`, {
       rate: {
         destination: {
           postal_code: '110001',
@@ -99,7 +99,7 @@ async function debugShippingIssue() {
   console.log('2. Find the CarrierService named "Deeprintz Live Shipping Rates"');
   console.log('3. Check its callback URL - it will show "not set"');
   console.log('4. Update the callback URL to:');
-  console.log(`   ${CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates`);
+  console.log(`   ${SHOPIFY_CONFIG.NGROK_URL}/api/deeprintz/dev/shopify/carrier/rates`);
   console.log('');
   console.log('5. Alternatively, disable the old CarrierService and enable the new one:');
   console.log('   "Deeprintz Live Shipping Rates (2025-11-18T10-17-03)"');
@@ -130,3 +130,4 @@ if (require.main === module) {
 }
 
 module.exports = { debugShippingIssue };
+

@@ -14,12 +14,12 @@
 const axios = require('axios');
 require('dotenv').config();
 
+const SHOPIFY_CONFIG = require('./config/shopify');
+
 // Configuration
 const CONFIG = {
   SHOP_DOMAIN: 'mayu-12351.myshopify.com',
   USER_ID: 2004,
-  NGROK_URL: 'https://df5b0a4dbe35.ngrok-free.app',
-  ENVIRONMENT: 'dev', // or 'live'
   DB_CONFIG: {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
@@ -28,8 +28,8 @@ const CONFIG = {
   }
 };
 
-// Get correct callback URL based on environment
-const CALLBACK_URL = `${CONFIG.NGROK_URL}/api/deeprintz/${CONFIG.ENVIRONMENT}/shopify/carrier/rates`;
+// Get correct callback URL from config
+const CALLBACK_URL = SHOPIFY_CONFIG.CARRIER_SERVICE_URL;
 
 console.log('🔧 FIXING SHOPIFY CARRIER SERVICE');
 console.log('='.repeat(80));
