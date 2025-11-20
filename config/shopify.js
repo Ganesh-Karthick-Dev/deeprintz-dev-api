@@ -7,7 +7,9 @@ const SHOPIFY_CONFIG = {
   PRODUCTION_API_URL: process.env.PRODUCTION_API_URL || 'https://api.deeprintz.com', // Update with your actual production API URL
   
   // Environment (dev/live)
-  ENVIRONMENT: 'dev', // Change to 'live' for production
+  // ENVIRONMENT: 'dev', // Change to 'live' for production
+  ENVIRONMENT: 'live', // Change to 'live' for production
+
   
   // Frontend URL (for redirects after OAuth) - DYNAMIC based on environment
   get FRONTEND_URL() {
